@@ -18,72 +18,158 @@ def get_supabase() -> Client:
     return _client
 
 
-LIMITS = {
-    "free": {"tasks_per_hour": 3, "max_file_bytes": 50 * 1024 * 1024},
-    "pro": {"tasks_per_hour": 9999, "max_file_bytes": 200 * 1024 * 1024},
-    "enterprise": {"tasks_per_hour": 9999, "max_file_bytes": 500 * 1024 * 1024},
-}
+# Pricing model:
+# - Free: 2 conversions per 24-hour window (resets every 24h)
+# - Pay-per-file: GHS 2.50 per action after free uses exhausted
+# - Strict session: user MUST be authenticated, tracked by user_id
+# - Device fingerprint: prevents multi-account abuse on same browser
+FREE_LIMIT = 2
+RESET_HOURS = 24
+PRICE_PER_FILE_GHS = 2.50
+MAX_FILE_BYTES = 50 * 1024 * 1024  # 50 MB
 
 
-def get_plan_for_ip(ip: str) -> str:
-    """Default to free for anonymous users."""
-    return "free"
-
-
-def get_plan_for_user(user_id: str) -> str:
+def link_device(user_id: str, device_id: str):
+    """Link a device fingerprint to a user account."""
+    if not device_id:
+        return
     sb = get_supabase()
-    result = sb.table("profiles").select("plan").eq("id", user_id).single().execute()
-    if result.data:
-        return result.data.get("plan", "free")
-    return "free"
+    # Upsert — ignore if already linked
+    sb.table("device_fingerprints").upsert(
+        {"device_id": device_id, "user_id": user_id},
+        on_conflict="device_id,user_id",
+    ).execute()
 
 
-def count_usage_last_hour(ip: str, user_id: Optional[str]) -> int:
+def count_usage_last_24h_by_device(device_id: str) -> int:
+    """Count ALL free (unpaid) tasks from this device across ALL accounts in 24h."""
+    if not device_id:
+        return 0
     sb = get_supabase()
-    one_hour_ago = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=RESET_HOURS)).isoformat()
 
-    if user_id:
-        result = (
-            sb.table("usage")
-            .select("id", count="exact")
-            .eq("user_id", user_id)
-            .gte("created_at", one_hour_ago)
-            .execute()
-        )
-    else:
-        result = (
-            sb.table("usage")
-            .select("id", count="exact")
-            .eq("ip_address", ip)
-            .gte("created_at", one_hour_ago)
-            .execute()
-        )
+    result = (
+        sb.table("usage")
+        .select("id", count="exact")
+        .eq("device_id", device_id)
+        .eq("paid", False)
+        .gte("created_at", cutoff)
+        .execute()
+    )
     return result.count or 0
 
 
-def record_usage(ip: str, user_id: Optional[str], tool: str, file_size: int):
+def count_usage_last_24h_by_user(user_id: str) -> int:
+    """Count free (unpaid) tasks for this user in 24h."""
+    sb = get_supabase()
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=RESET_HOURS)).isoformat()
+
+    result = (
+        sb.table("usage")
+        .select("id", count="exact")
+        .eq("user_id", user_id)
+        .eq("paid", False)
+        .gte("created_at", cutoff)
+        .execute()
+    )
+    return result.count or 0
+
+
+def get_effective_usage(user_id: str, device_id: Optional[str]) -> int:
+    """Get the higher of user-based or device-based usage count.
+    This prevents someone from creating multiple accounts on the same device."""
+    user_count = count_usage_last_24h_by_user(user_id)
+    device_count = count_usage_last_24h_by_device(device_id) if device_id else 0
+    return max(user_count, device_count)
+
+
+def get_oldest_free_use_time(user_id: str, device_id: Optional[str]) -> Optional[str]:
+    """Get the earliest free use timestamp in the 24h window (user or device)."""
+    sb = get_supabase()
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=RESET_HOURS)).isoformat()
+
+    # Check user-based
+    result = (
+        sb.table("usage")
+        .select("created_at")
+        .eq("user_id", user_id)
+        .eq("paid", False)
+        .gte("created_at", cutoff)
+        .order("created_at", desc=False)
+        .limit(1)
+        .execute()
+    )
+    user_oldest = result.data[0]["created_at"] if result.data else None
+
+    # Check device-based
+    device_oldest = None
+    if device_id:
+        result = (
+            sb.table("usage")
+            .select("created_at")
+            .eq("device_id", device_id)
+            .eq("paid", False)
+            .gte("created_at", cutoff)
+            .order("created_at", desc=False)
+            .limit(1)
+            .execute()
+        )
+        device_oldest = result.data[0]["created_at"] if result.data else None
+
+    # Return the earlier of the two
+    if user_oldest and device_oldest:
+        return min(user_oldest, device_oldest)
+    return user_oldest or device_oldest
+
+
+def record_usage(user_id: str, tool: str, file_size: int, paid: bool = False, device_id: Optional[str] = None):
     sb = get_supabase()
     sb.table("usage").insert(
         {
-            "ip_address": ip,
             "user_id": user_id,
             "tool": tool,
             "file_size_bytes": file_size,
+            "paid": paid,
+            "device_id": device_id,
         }
     ).execute()
 
 
-def check_limits(ip: str, user_id: Optional[str], file_size: int) -> Optional[str]:
+def check_limits(user_id: str, file_size: int, device_id: Optional[str] = None) -> Optional[str]:
     """Returns an error message if limits exceeded, or None if OK."""
-    plan = get_plan_for_user(user_id) if user_id else get_plan_for_ip(ip)
-    limits = LIMITS.get(plan, LIMITS["free"])
+    if file_size > MAX_FILE_BYTES:
+        max_mb = MAX_FILE_BYTES // (1024 * 1024)
+        return "File too large. Maximum file size is %d MB." % max_mb
 
-    if file_size > limits["max_file_bytes"]:
-        max_mb = limits["max_file_bytes"] // (1024 * 1024)
-        return f"File too large. {plan.title()} plan allows up to {max_mb} MB."
-
-    used = count_usage_last_hour(ip, user_id)
-    if used >= limits["tasks_per_hour"]:
-        return f"Rate limit reached. {plan.title()} plan allows {limits['tasks_per_hour']} tasks per hour. Upgrade for unlimited."
+    used = get_effective_usage(user_id, device_id)
+    if used >= FREE_LIMIT:
+        return "FREE_LIMIT_REACHED"
 
     return None
+
+
+def get_usage_info(user_id: str, device_id: Optional[str] = None) -> dict:
+    # Link device to user on every check
+    if device_id:
+        link_device(user_id, device_id)
+
+    used = get_effective_usage(user_id, device_id)
+    free_left = max(0, FREE_LIMIT - used)
+
+    resets_at = None
+    if free_left == 0:
+        oldest = get_oldest_free_use_time(user_id, device_id)
+        if oldest:
+            from dateutil.parser import parse as parse_dt
+            oldest_dt = parse_dt(oldest)
+            reset_dt = oldest_dt + timedelta(hours=RESET_HOURS)
+            resets_at = reset_dt.isoformat()
+
+    return {
+        "total_used": used,
+        "free_limit": FREE_LIMIT,
+        "free_remaining": free_left,
+        "needs_payment": free_left == 0,
+        "price_per_file_ghs": PRICE_PER_FILE_GHS,
+        "resets_at": resets_at,
+    }

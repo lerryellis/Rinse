@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
-from src.routers import pdf_tools, auth
+from src.routers import pdf_tools, auth, payments
 
 load_dotenv()
 
@@ -25,6 +25,7 @@ app.add_middleware(
 
 app.include_router(pdf_tools.router, prefix="/api/pdf", tags=["PDF Tools"])
 app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
+app.include_router(payments.router, prefix="/api/payments", tags=["Payments"])
 
 
 @app.get("/")

@@ -1,44 +1,42 @@
-from fastapi import APIRouter, Request
+from __future__ import annotations
+
+from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
-from src.services.usage import count_usage_last_hour, get_plan_for_user, get_plan_for_ip, LIMITS
+from typing import Optional
+from src.services.usage import get_usage_info
 
 router = APIRouter()
 
 
 class UsageResponse(BaseModel):
-    tasks_used: int
-    tasks_limit: int
-    remaining: int
-    plan: str
-    max_file_mb: int
+    total_used: int
+    free_limit: int
+    free_remaining: int
+    needs_payment: bool
+    price_per_file_ghs: float
+    resets_at: Optional[str]
 
 
 @router.get("/usage")
 async def get_usage(request: Request):
-    """Get current usage stats for the user/session."""
-    # Extract user from auth header if present
-    user_id = None
+    """Get current usage stats. Requires authentication."""
+    user_id = _require_user(request)
+    device_id = request.headers.get("x-device-id")
+    info = get_usage_info(user_id, device_id)
+    return UsageResponse(**info)
+
+
+def _require_user(request: Request) -> str:
     auth = request.headers.get("authorization", "")
-    if auth.startswith("Bearer "):
-        try:
-            import jwt
-            token = auth.split(" ", 1)[1]
-            payload = jwt.decode(token, options={"verify_signature": False})
-            user_id = payload.get("sub")
-        except Exception:
-            pass
-
-    forwarded = request.headers.get("x-forwarded-for")
-    ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "unknown")
-
-    plan = get_plan_for_user(user_id) if user_id else get_plan_for_ip(ip)
-    limits = LIMITS.get(plan, LIMITS["free"])
-    used = count_usage_last_hour(ip, user_id)
-
-    return UsageResponse(
-        tasks_used=used,
-        tasks_limit=limits["tasks_per_hour"],
-        remaining=max(0, limits["tasks_per_hour"] - used),
-        plan=plan,
-        max_file_mb=limits["max_file_bytes"] // (1024 * 1024),
-    )
+    if not auth.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Sign in required")
+    try:
+        import jwt
+        token = auth.split(" ", 1)[1]
+        payload = jwt.decode(token, options={"verify_signature": False})
+        user_id = payload.get("sub")
+        if not user_id:
+            raise ValueError("No sub")
+        return user_id
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid session")

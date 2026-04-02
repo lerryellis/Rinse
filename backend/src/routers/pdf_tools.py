@@ -7,35 +7,31 @@ from src.services.usage import check_limits, record_usage
 router = APIRouter()
 
 
-def get_client_ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
-
-
-def get_user_id(request: Request):
-    """Extract user_id from Supabase JWT if present."""
+def require_user(request: Request) -> str:
+    """Extract user_id from Supabase JWT. Raises 401 if not authenticated."""
     auth = request.headers.get("authorization", "")
     if not auth.startswith("Bearer "):
-        return None
+        raise HTTPException(status_code=401, detail="Sign in required to use this tool")
     try:
         import jwt
         token = auth.split(" ", 1)[1]
         payload = jwt.decode(token, options={"verify_signature": False})
-        return payload.get("sub")
+        user_id = payload.get("sub")
+        if not user_id:
+            raise ValueError("No sub in token")
+        return user_id
     except Exception:
-        return None
+        raise HTTPException(status_code=401, detail="Invalid session. Please sign in again.")
 
 
 async def enforce_limits(request: Request, file_size: int, tool: str):
-    """Check usage limits and record usage. Raises HTTPException if over limit."""
-    ip = get_client_ip(request)
-    user_id = get_user_id(request)
-    error = check_limits(ip, user_id, file_size)
+    """Require auth, check usage limits with device fingerprint, and record usage."""
+    user_id = require_user(request)
+    device_id = request.headers.get("x-device-id")
+    error = check_limits(user_id, file_size, device_id)
     if error:
         raise HTTPException(status_code=429, detail=error)
-    record_usage(ip, user_id, tool, file_size)
+    record_usage(user_id, tool, file_size, device_id=device_id)
 
 
 @router.post("/compress")

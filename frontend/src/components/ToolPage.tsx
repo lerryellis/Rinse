@@ -1,17 +1,38 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { mergePdfs } from "@/lib/pdf/merge";
 import { splitPdf, getPageCount, type SplitOptions } from "@/lib/pdf/split";
 import { rotatePdf, type RotationAngle } from "@/lib/pdf/rotate";
 import { deletePages } from "@/lib/pdf/delete-pages";
 import { extractPages } from "@/lib/pdf/extract";
+import { useAuth } from "@/context/AuthContext";
 
 interface ToolPageProps {
   slug: string;
   title: string;
   description: string;
   side: "client" | "server";
+}
+
+interface UsageInfo {
+  total_used: number;
+  free_limit: number;
+  free_remaining: number;
+  needs_payment: boolean;
+  price_per_file_ghs: number;
+  resets_at: string | null;
+}
+
+function formatTimeLeft(resetsAt: string): string {
+  const now = new Date().getTime();
+  const reset = new Date(resetsAt).getTime();
+  const diff = reset - now;
+  if (diff <= 0) return "soon";
+  const hours = Math.floor(diff / (1000 * 60 * 60));
+  const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+  if (hours > 0) return `${hours}h ${mins}m`;
+  return `${mins}m`;
 }
 
 function downloadBlob(data: Uint8Array | Blob, filename: string) {
@@ -30,6 +51,7 @@ function downloadZip(files: { name: string; data: Uint8Array }[]) {
 }
 
 export default function ToolPage({ slug, title, description, side }: ToolPageProps) {
+  const { user, session } = useAuth();
   const [files, setFiles] = useState<File[]>([]);
   const [processing, setProcessing] = useState(false);
   const [resultData, setResultData] = useState<Uint8Array | Blob | null>(null);
@@ -38,6 +60,10 @@ export default function ToolPage({ slug, title, description, side }: ToolPagePro
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Usage & payment state
+  const [usage, setUsage] = useState<UsageInfo | null>(null);
+  const [paymentLoading, setPaymentLoading] = useState(false);
 
   // Tool-specific options
   const [splitMode, setSplitMode] = useState<"each" | "ranges">("each");
@@ -48,6 +74,66 @@ export default function ToolPage({ slug, title, description, side }: ToolPagePro
 
   const acceptMultiple = ["merge", "alternate"].includes(slug);
   const acceptTypes = slug === "word-to-pdf" ? ".doc,.docx" : ".pdf";
+
+  // Fetch usage on mount (with device fingerprint)
+  useEffect(() => {
+    if (!session?.access_token) return;
+    const fetchUsage = async () => {
+      const { getDeviceId } = await import("@/lib/fingerprint");
+      const deviceId = await getDeviceId();
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const res = await fetch(`${apiUrl}/api/auth/usage`, {
+        headers: {
+          "Authorization": `Bearer ${session.access_token}`,
+          "X-Device-Id": deviceId,
+        },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setUsage(data);
+      }
+    };
+    fetchUsage().catch(() => {});
+  }, [session]);
+
+  // Initiate Paystack payment
+  const initiatePayment = async () => {
+    setPaymentLoading(true);
+    setError(null);
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (session?.access_token) {
+        headers["Authorization"] = `Bearer ${session.access_token}`;
+      }
+      try {
+        const { getDeviceId } = await import("@/lib/fingerprint");
+        headers["X-Device-Id"] = await getDeviceId();
+      } catch {}
+
+      localStorage.setItem("rinse_pending_tool", slug);
+
+      const res = await fetch(`${apiUrl}/api/payments/initialize`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          tool: slug,
+          callback_url: `${window.location.origin}/payment/verify`,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: "Payment failed" }));
+        throw new Error(err.detail);
+      }
+
+      const data = await res.json();
+      window.location.href = data.authorization_url;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Payment failed");
+      setPaymentLoading(false);
+    }
+  };
 
   const handleFiles = useCallback(async (incoming: FileList | null) => {
     if (!incoming) return;
@@ -137,8 +223,17 @@ export default function ToolPage({ slug, title, description, side }: ToolPagePro
         };
 
         const endpoint = endpointMap[slug] || slug;
+        const fetchHeaders: Record<string, string> = {};
+        if (session?.access_token) {
+          fetchHeaders["Authorization"] = `Bearer ${session.access_token}`;
+        }
+        try {
+          const { getDeviceId } = await import("@/lib/fingerprint");
+          fetchHeaders["X-Device-Id"] = await getDeviceId();
+        } catch {}
         const res = await fetch(`${apiUrl}/api/pdf/${endpoint}`, {
           method: "POST",
+          headers: fetchHeaders,
           body: formData,
         });
 
@@ -204,7 +299,36 @@ export default function ToolPage({ slug, title, description, side }: ToolPagePro
 
       {/* Upload / Processing area */}
       <div className="max-w-2xl mx-auto px-6 py-12">
-        {files.length === 0 ? (
+        {!user ? (
+          /* ─── Sign-in gate ─── */
+          <div className="border-2 border-dashed border-gray-300 rounded-2xl p-12 text-center">
+            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gray-100 flex items-center justify-center">
+              <svg className="w-8 h-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+              </svg>
+            </div>
+            <p className="text-lg font-semibold text-gray-700 mb-1">
+              Sign in to use {title}
+            </p>
+            <p className="text-sm text-gray-400 mb-6">
+              Create a free account to get 2 free conversions every 24 hours
+            </p>
+            <div className="flex items-center justify-center gap-3">
+              <a
+                href="/auth/signin"
+                className="px-6 py-2.5 rounded-lg bg-[#0282e5] text-white text-sm font-bold hover:bg-[#0170c9] transition-colors"
+              >
+                Sign In
+              </a>
+              <a
+                href="/auth/signup"
+                className="px-6 py-2.5 rounded-lg border border-gray-300 text-sm font-medium text-gray-600 hover:border-[#0282e5] hover:text-[#0282e5] transition-colors"
+              >
+                Create Account
+              </a>
+            </div>
+          </div>
+        ) : files.length === 0 ? (
           /* ─── Drop zone ─── */
           <div
             className={`border-2 border-dashed rounded-2xl p-12 text-center transition-colors cursor-pointer ${
@@ -348,8 +472,45 @@ export default function ToolPage({ slug, title, description, side }: ToolPagePro
               </div>
             )}
 
-            {/* Process button */}
-            {!hasResult && (
+            {/* Usage info banner */}
+            {!hasResult && usage && (
+              <div className={`p-3 rounded-xl text-sm text-center ${usage.needs_payment ? "bg-amber-50 border border-amber-200 text-amber-700" : "bg-blue-50 border border-blue-200 text-blue-700"}`}>
+                {usage.needs_payment ? (
+                  <>
+                    You&apos;ve used your {usage.free_limit} free conversions. Next action costs <strong>GHS {usage.price_per_file_ghs.toFixed(2)}</strong>
+                    {usage.resets_at && (
+                      <span className="block mt-1 text-xs text-amber-500">
+                        Free uses reset in {formatTimeLeft(usage.resets_at)}
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <>{usage.free_remaining} of {usage.free_limit} free conversions remaining &middot; resets every 24h</>
+                )}
+              </div>
+            )}
+
+            {/* Process button OR payment button */}
+            {!hasResult && usage?.needs_payment ? (
+              <button
+                type="button"
+                onClick={initiatePayment}
+                disabled={paymentLoading}
+                className="w-full py-4 rounded-xl bg-[#00BB88] text-white text-base font-bold hover:bg-[#00a87a] disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+              >
+                {paymentLoading ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Redirecting to payment...
+                  </span>
+                ) : (
+                  <>Pay GHS {usage.price_per_file_ghs.toFixed(2)} &amp; {title}</>
+                )}
+              </button>
+            ) : !hasResult && (
               <button
                 type="button"
                 onClick={handleProcess}
