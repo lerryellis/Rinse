@@ -51,7 +51,7 @@ function downloadZip(files: { name: string; data: Uint8Array }[]) {
 }
 
 export default function ToolPage({ slug, title, description, side }: ToolPageProps) {
-  const { user, session } = useAuth();
+  const { user, session, emailVerified } = useAuth();
   const [files, setFiles] = useState<File[]>([]);
   const [processing, setProcessing] = useState(false);
   const [resultData, setResultData] = useState<Uint8Array | Blob | null>(null);
@@ -143,9 +143,19 @@ export default function ToolPage({ slug, title, description, side }: ToolPagePro
     }
   };
 
+  const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
+
   const handleFiles = useCallback(async (incoming: FileList | null) => {
     if (!incoming) return;
     const arr = Array.from(incoming);
+
+    // Reject files over 50 MB
+    const oversized = arr.find((f) => f.size > MAX_FILE_SIZE);
+    if (oversized) {
+      setError(`"${oversized.name}" is ${(oversized.size / (1024 * 1024)).toFixed(1)} MB. Maximum file size is 50 MB.`);
+      return;
+    }
+
     const newFiles = acceptMultiple ? [...files, ...arr] : arr.slice(0, 1);
     setFiles(newFiles);
     setResultData(null);
@@ -386,6 +396,24 @@ export default function ToolPage({ slug, title, description, side }: ToolPagePro
                 Create Account
               </a>
             </div>
+          </div>
+        ) : user && !emailVerified ? (
+          /* ─── Email verification gate ─── */
+          <div className="border-2 border-dashed border-amber-300 rounded-2xl p-12 text-center bg-amber-50">
+            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-amber-100 flex items-center justify-center">
+              <svg className="w-8 h-8 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <p className="text-lg font-semibold text-amber-800 mb-1">
+              Verify your email to continue
+            </p>
+            <p className="text-sm text-amber-600 mb-2">
+              We sent a confirmation link to <strong>{user.email}</strong>
+            </p>
+            <p className="text-xs text-amber-500">
+              Check your inbox (and spam folder), then refresh this page.
+            </p>
           </div>
         ) : isHtmlTool && files.length === 0 ? (
           /* ─── HTML to PDF input ─── */

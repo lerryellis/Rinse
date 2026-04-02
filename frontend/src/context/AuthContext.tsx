@@ -9,6 +9,7 @@ interface AuthState {
   profile: UserProfile | null;
   session: Session | null;
   loading: boolean;
+  emailVerified: boolean;
   signInWithEmail: (email: string, password: string) => Promise<{ error: string | null }>;
   signUpWithEmail: (email: string, password: string, fullName: string) => Promise<{ error: string | null }>;
   signInWithGoogle: () => Promise<void>;
@@ -20,6 +21,7 @@ const AuthContext = createContext<AuthState>({
   profile: null,
   session: null,
   loading: true,
+  emailVerified: false,
   signInWithEmail: async () => ({ error: null }),
   signUpWithEmail: async () => ({ error: null }),
   signInWithGoogle: async () => {},
@@ -99,6 +101,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         profile,
         session,
         loading,
+        emailVerified: !!user?.email_confirmed_at,
         signInWithEmail,
         signUpWithEmail,
         signInWithGoogle,

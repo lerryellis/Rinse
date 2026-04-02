@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
+import logging
 import os
 import uuid
 from typing import Optional
@@ -8,7 +12,9 @@ import httpx
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 
-from src.services.usage import get_supabase, PRICE_PER_FILE_GHS
+from src.services.usage import get_supabase, PRICE_PER_FILE_GHS, record_usage
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -152,3 +158,60 @@ async def verify_payment(reference: str):
         amount_ghs=amount_ghs,
         paid=paid,
     )
+
+
+@router.post("/webhook")
+async def paystack_webhook(request: Request):
+    """Paystack server-to-server webhook. Confirms payment even if user closes browser."""
+    if not PAYSTACK_SECRET:
+        raise HTTPException(status_code=500, detail="Payment not configured")
+
+    # Verify signature
+    body = await request.body()
+    signature = request.headers.get("x-paystack-signature", "")
+    expected = hmac.new(
+        PAYSTACK_SECRET.encode("utf-8"),
+        body,
+        hashlib.sha512,
+    ).hexdigest()
+
+    if not hmac.compare_digest(signature, expected):
+        logger.warning("Invalid Paystack webhook signature")
+        raise HTTPException(status_code=400, detail="Invalid signature")
+
+    payload = json.loads(body)
+    event = payload.get("event")
+    data = payload.get("data", {})
+
+    if event == "charge.success":
+        reference = data.get("reference")
+        amount_ghs = data.get("amount", 0) / 100
+        metadata = data.get("metadata", {})
+        tool = metadata.get("tool")
+        user_id = metadata.get("user_id")
+
+        if not reference:
+            return {"status": "ignored", "reason": "no reference"}
+
+        sb = get_supabase()
+
+        # Check if already processed (idempotency)
+        existing = sb.table("payments").select("status").eq("reference", reference).single().execute()
+        if existing.data and existing.data.get("status") == "success":
+            return {"status": "already_processed"}
+
+        # Update payment record
+        sb.table("payments").update({
+            "status": "success",
+            "paystack_response": data,
+        }).eq("reference", reference).execute()
+
+        # Record as paid usage so the user gets their processing credit
+        if user_id and tool:
+            record_usage(user_id, tool, 0, paid=True)
+
+        logger.info("Webhook: payment %s confirmed for user %s", reference, user_id)
+        return {"status": "success"}
+
+    # Acknowledge other events without processing
+    return {"status": "ignored", "event": event}
