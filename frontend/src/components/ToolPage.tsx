@@ -73,7 +73,15 @@ export default function ToolPage({ slug, title, description, side }: ToolPagePro
   const [pageCount, setPageCount] = useState(0);
 
   const acceptMultiple = ["merge", "alternate"].includes(slug);
-  const acceptTypes = slug === "word-to-pdf" ? ".doc,.docx" : ".pdf";
+  const isHtmlTool = slug === "html-to-pdf";
+  const acceptTypes = slug === "word-to-pdf" ? ".doc,.docx" : isHtmlTool ? ".html,.htm" : ".pdf";
+
+  // HTML-to-PDF specific state
+  const [htmlMode, setHtmlMode] = useState<"url" | "code" | "file">("url");
+  const [htmlUrl, setHtmlUrl] = useState("");
+  const [htmlCode, setHtmlCode] = useState("");
+  const [htmlFormat, setHtmlFormat] = useState("A4");
+  const [htmlLandscape, setHtmlLandscape] = useState(false);
 
   // Fetch usage on mount (with device fingerprint)
   useEffect(() => {
@@ -160,7 +168,11 @@ export default function ToolPage({ slug, title, description, side }: ToolPagePro
   };
 
   const handleProcess = async () => {
-    if (files.length === 0) return;
+    // HTML tool doesn't require files in url/code mode
+    if (!isHtmlTool && files.length === 0) return;
+    if (isHtmlTool && htmlMode === "url" && !htmlUrl) return;
+    if (isHtmlTool && htmlMode === "code" && !htmlCode) return;
+    if (isHtmlTool && htmlMode === "file" && files.length === 0) return;
     setProcessing(true);
     setError(null);
     setResultData(null);
@@ -199,6 +211,53 @@ export default function ToolPage({ slug, title, description, side }: ToolPagePro
         await new Promise((r) => setTimeout(r, 1000));
         setResultData(new Uint8Array());
         setResultName("result.pdf");
+      }
+
+      // ─── HTML to PDF ───
+      else if (isHtmlTool) {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+        const fetchHeaders: Record<string, string> = {};
+        if (session?.access_token) {
+          fetchHeaders["Authorization"] = `Bearer ${session.access_token}`;
+        }
+        try {
+          const { getDeviceId } = await import("@/lib/fingerprint");
+          fetchHeaders["X-Device-Id"] = await getDeviceId();
+        } catch {}
+
+        let res: Response;
+
+        if (htmlMode === "file" && files.length > 0) {
+          const formData = new FormData();
+          formData.append("file", files[0]);
+          formData.append("format", htmlFormat);
+          formData.append("landscape", String(htmlLandscape));
+          res = await fetch(`${apiUrl}/api/pdf/html-to-pdf`, {
+            method: "POST",
+            headers: fetchHeaders,
+            body: formData,
+          });
+        } else {
+          fetchHeaders["Content-Type"] = "application/json";
+          res = await fetch(`${apiUrl}/api/pdf/html-to-pdf`, {
+            method: "POST",
+            headers: fetchHeaders,
+            body: JSON.stringify({
+              ...(htmlMode === "url" ? { url: htmlUrl } : { html: htmlCode }),
+              format: htmlFormat,
+              landscape: htmlLandscape,
+            }),
+          });
+        }
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: "Conversion failed" }));
+          throw new Error(err.detail);
+        }
+
+        const blob = await res.blob();
+        setResultData(blob);
+        setResultName("html-converted.pdf");
       }
 
       // ─── Server-side tools ───
@@ -328,7 +387,158 @@ export default function ToolPage({ slug, title, description, side }: ToolPagePro
               </a>
             </div>
           </div>
-        ) : files.length === 0 ? (
+        ) : isHtmlTool && files.length === 0 ? (
+          /* ─── HTML to PDF input ─── */
+          <div className="space-y-4">
+            {/* Mode selector */}
+            <div className="flex gap-2">
+              {([["url", "From URL"], ["code", "Paste HTML"], ["file", "Upload File"]] as const).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setHtmlMode(mode)}
+                  className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                    htmlMode === mode ? "bg-[#0282e5] text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {htmlMode === "url" && (
+              <div>
+                <label htmlFor="html-url" className="block text-sm font-medium text-gray-700 mb-1">Website URL</label>
+                <input
+                  id="html-url"
+                  type="url"
+                  placeholder="https://example.com"
+                  value={htmlUrl}
+                  onChange={(e) => setHtmlUrl(e.target.value)}
+                  className="w-full px-4 py-3 rounded-lg border border-gray-300 text-sm focus:outline-none focus:border-[#0282e5] focus:ring-1 focus:ring-[#0282e5]"
+                />
+              </div>
+            )}
+
+            {htmlMode === "code" && (
+              <div>
+                <label htmlFor="html-code" className="block text-sm font-medium text-gray-700 mb-1">HTML Code</label>
+                <textarea
+                  id="html-code"
+                  placeholder="<html><body><h1>Hello World</h1></body></html>"
+                  value={htmlCode}
+                  onChange={(e) => setHtmlCode(e.target.value)}
+                  rows={10}
+                  className="w-full px-4 py-3 rounded-lg border border-gray-300 text-sm font-mono focus:outline-none focus:border-[#0282e5] focus:ring-1 focus:ring-[#0282e5] resize-y"
+                />
+              </div>
+            )}
+
+            {htmlMode === "file" && (
+              <div
+                className={`border-2 border-dashed rounded-2xl p-10 text-center cursor-pointer transition-colors ${
+                  dragOver ? "border-[#0282e5] bg-blue-50" : "border-gray-300 hover:border-[#0282e5] hover:bg-blue-50/30"
+                }`}
+                onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={(e) => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files); }}
+                onClick={() => inputRef.current?.click()}
+              >
+                <input ref={inputRef} type="file" accept=".html,.htm" className="hidden" aria-label="Upload HTML file" onChange={(e) => handleFiles(e.target.files)} />
+                <p className="text-base font-semibold text-gray-700 mb-1">Drop your HTML file here</p>
+                <p className="text-sm text-gray-400">or click to browse</p>
+              </div>
+            )}
+
+            {/* Format options */}
+            <div className="bg-white rounded-xl border border-gray-200 p-4 flex flex-wrap gap-4">
+              <div>
+                <label htmlFor="page-format" className="block text-xs font-medium text-gray-500 mb-1">Page Size</label>
+                <select
+                  id="page-format"
+                  value={htmlFormat}
+                  onChange={(e) => setHtmlFormat(e.target.value)}
+                  className="px-3 py-2 rounded-lg border border-gray-200 text-sm"
+                >
+                  <option value="A4">A4</option>
+                  <option value="Letter">Letter</option>
+                  <option value="A3">A3</option>
+                  <option value="Legal">Legal</option>
+                  <option value="Tabloid">Tabloid</option>
+                </select>
+              </div>
+              <div className="flex items-end">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={htmlLandscape}
+                    onChange={(e) => setHtmlLandscape(e.target.checked)}
+                    className="w-4 h-4 rounded border-gray-300 text-[#0282e5] focus:ring-[#0282e5]"
+                  />
+                  <span className="text-sm text-gray-600">Landscape</span>
+                </label>
+              </div>
+            </div>
+
+            {/* Usage + process/payment buttons for HTML tool */}
+            {!hasResult && usage && (
+              <div className={`p-3 rounded-xl text-sm text-center ${usage.needs_payment ? "bg-amber-50 border border-amber-200 text-amber-700" : "bg-blue-50 border border-blue-200 text-blue-700"}`}>
+                {usage.needs_payment ? (
+                  <>
+                    You&apos;ve used your {usage.free_limit} free conversions. Next action costs <strong>GHS {usage.price_per_file_ghs.toFixed(2)}</strong>
+                    {usage.resets_at && (
+                      <span className="block mt-1 text-xs text-amber-500">
+                        Free uses reset in {formatTimeLeft(usage.resets_at)}
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <>{usage.free_remaining} of {usage.free_limit} free conversions remaining &middot; resets every 24h</>
+                )}
+              </div>
+            )}
+
+            {!hasResult && usage?.needs_payment ? (
+              <button type="button" onClick={initiatePayment} disabled={paymentLoading}
+                className="w-full py-4 rounded-xl bg-[#00BB88] text-white text-base font-bold hover:bg-[#00a87a] disabled:opacity-60 disabled:cursor-not-allowed transition-colors">
+                {paymentLoading ? "Redirecting to payment..." : `Pay GHS ${usage.price_per_file_ghs.toFixed(2)} & Convert to PDF`}
+              </button>
+            ) : !hasResult && (
+              <button type="button" onClick={handleProcess} disabled={processing}
+                className="w-full py-4 rounded-xl bg-[#0282e5] text-white text-base font-bold hover:bg-[#0170c9] disabled:opacity-60 disabled:cursor-not-allowed transition-colors">
+                {processing ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Converting...
+                  </span>
+                ) : "Convert to PDF"}
+              </button>
+            )}
+
+            {error && (
+              <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-sm text-red-600">{error}</div>
+            )}
+
+            {hasResult && (
+              <div className="p-6 rounded-xl bg-green-50 border border-green-200 text-center">
+                <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-green-100 flex items-center justify-center">
+                  <svg className="w-6 h-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+                <p className="text-green-800 font-semibold mb-1">Done!</p>
+                <p className="text-sm text-green-600 mb-4">Your PDF has been generated.</p>
+                <button type="button" onClick={handleDownload}
+                  className="px-6 py-2.5 rounded-lg bg-green-600 text-white text-sm font-bold hover:bg-green-700 transition-colors">
+                  Download PDF
+                </button>
+              </div>
+            )}
+          </div>
+        ) : files.length === 0 && !isHtmlTool ? (
           /* ─── Drop zone ─── */
           <div
             className={`border-2 border-dashed rounded-2xl p-12 text-center transition-colors cursor-pointer ${
@@ -347,6 +557,7 @@ export default function ToolPage({ slug, title, description, side }: ToolPagePro
               accept={acceptTypes}
               multiple={acceptMultiple}
               className="hidden"
+              aria-label="Upload file"
               onChange={(e) => handleFiles(e.target.files)}
             />
             <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-blue-100 flex items-center justify-center">

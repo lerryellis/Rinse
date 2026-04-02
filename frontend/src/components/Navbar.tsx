@@ -28,6 +28,7 @@ const dropdownTools = {
     { name: "PDF to Text", href: "/tools/pdf-to-text" },
     { name: "Word to PDF", href: "/tools/word-to-pdf" },
     { name: "OCR", href: "/tools/ocr" },
+    { name: "HTML to PDF", href: "/tools/html-to-pdf" },
   ],
   Optimize: [
     { name: "Compress PDF", href: "/tools/compress" },

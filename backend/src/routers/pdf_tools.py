@@ -373,3 +373,69 @@ async def word_to_pdf(request: Request, file: UploadFile = File(...)):
             "Content-Disposition": f'attachment; filename="converted.pdf"',
         },
     )
+
+
+@router.post("/html-to-pdf")
+async def html_to_pdf(request: Request):
+    """Convert HTML content or a URL to PDF using a headless browser."""
+    from playwright.async_api import async_playwright
+
+    content_type = request.headers.get("content-type", "")
+
+    # Accept JSON body with html or url
+    if "application/json" in content_type:
+        body = await request.json()
+        html = body.get("html")
+        url = body.get("url")
+        page_format = body.get("format", "A4")
+        landscape = body.get("landscape", False)
+    # Accept multipart form with an HTML file
+    else:
+        form = await request.form()
+        file = form.get("file")
+        url = form.get("url")
+        page_format = form.get("format", "A4")
+        landscape = str(form.get("landscape", "false")).lower() == "true"
+        html = None
+        if file and hasattr(file, "read"):
+            html_bytes = await file.read()
+            html = html_bytes.decode("utf-8", errors="replace")
+
+    if not html and not url:
+        raise HTTPException(status_code=400, detail="Provide either 'html' content or a 'url'")
+
+    # Estimate size for limits (use html length or a default for URL)
+    size_estimate = len(html.encode("utf-8")) if html else 1024
+    user_id = require_user(request)
+    device_id = request.headers.get("x-device-id")
+    error = check_limits(user_id, size_estimate, device_id)
+    if error:
+        raise HTTPException(status_code=429, detail=error)
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        page = await browser.new_page()
+
+        if url:
+            await page.goto(url, wait_until="networkidle", timeout=30000)
+        else:
+            await page.set_content(html, wait_until="networkidle", timeout=15000)
+
+        pdf_bytes = await page.pdf(
+            format=page_format,
+            landscape=landscape,
+            print_background=True,
+            margin={"top": "20mm", "bottom": "20mm", "left": "15mm", "right": "15mm"},
+        )
+
+        await browser.close()
+
+    record_usage(user_id, "html-to-pdf", len(pdf_bytes), device_id=device_id)
+
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": 'attachment; filename="html-converted.pdf"',
+        },
+    )

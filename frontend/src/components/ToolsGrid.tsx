@@ -272,6 +272,21 @@ const convertTools: Tool[] = [
       </svg>
     ),
   },
+  {
+    name: "HTML to PDF",
+    desc: "Convert webpage or HTML to PDF",
+    href: "/tools/html-to-pdf",
+    color: "#e96e00",
+    bgColor: "#fff2eb",
+    icon: (
+      <svg viewBox="0 0 40 40" fill="none">
+        <rect width="40" height="40" rx="8" fill="#fff2eb" />
+        <text x="6" y="17" fontFamily="monospace" fontSize="7" fill="#e96e00" opacity=".6">&lt;/&gt;</text>
+        <rect x="20" y="16" width="9" height="12" rx="2" fill="#e96e00" opacity=".5" />
+        <path d="M14 22l4-2-4-2" stroke="#e96e00" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
 ];
 
 const optimizeTools: Tool[] = [

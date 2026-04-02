@@ -24,6 +24,7 @@ const toolMeta: Record<string, { title: string; description: string; side: "clie
   rotate: { title: "Rotate PDF", description: "Rotate PDF pages in any direction", side: "client" },
   protect: { title: "Protect PDF", description: "Add a password to protect your PDF", side: "server" },
   unlock: { title: "Unlock PDF", description: "Remove the password from a protected PDF", side: "server" },
+  "html-to-pdf": { title: "HTML to PDF", description: "Convert HTML content or a webpage URL to a PDF document", side: "server" },
 };
 
 export async function generateStaticParams() {
