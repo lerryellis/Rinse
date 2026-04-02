@@ -32,11 +32,11 @@ const columns = [
   {
     title: "Legal",
     links: [
-      { name: "Terms of Service", href: "#" },
-      { name: "Privacy Policy", href: "#" },
-      { name: "Cookies Policy", href: "#" },
-      { name: "Security", href: "#" },
-      { name: "SLA", href: "#" },
+      { name: "Terms of Service", href: "/legal/terms" },
+      { name: "Privacy Policy", href: "/legal/privacy" },
+      { name: "Cookies Policy", href: "/legal/cookies" },
+      { name: "Security", href: "/legal/security" },
+      { name: "SLA", href: "/legal/sla" },
     ],
   },
 ];
