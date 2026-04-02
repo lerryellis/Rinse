@@ -361,6 +361,21 @@ const optimizeTools: Tool[] = [
       </svg>
     ),
   },
+  {
+    name: "Scan & Analyze",
+    desc: "Detect sizes & suggest print layout",
+    href: "/tools/scan",
+    color: "#7c5cfc",
+    bgColor: "#f3eeff",
+    icon: (
+      <svg viewBox="0 0 40 40" fill="none">
+        <rect width="40" height="40" rx="8" fill="#f3eeff" />
+        <rect x="12" y="10" width="16" height="20" rx="2" fill="#7c5cfc" opacity=".15" />
+        <path d="M10 20h20" stroke="#7c5cfc" strokeWidth="2" strokeLinecap="round" strokeDasharray="1 3" />
+        <path d="M16 15h8M16 25h6" stroke="#7c5cfc" strokeWidth="1.5" strokeLinecap="round" opacity=".5" />
+      </svg>
+    ),
+  },
 ];
 
 const categories = [

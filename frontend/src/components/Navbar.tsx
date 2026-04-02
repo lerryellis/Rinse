@@ -36,6 +36,7 @@ const dropdownTools = {
     { name: "Rotate PDF", href: "/tools/rotate" },
     { name: "Protect PDF", href: "/tools/protect" },
     { name: "Unlock PDF", href: "/tools/unlock" },
+    { name: "Scan & Analyze", href: "/tools/scan" },
   ],
 };
 
@@ -73,7 +74,7 @@ export default function Navbar() {
             onMouseEnter={() => setDropdownOpen(true)}
             onMouseLeave={() => setDropdownOpen(false)}
           >
-            <button className="px-3 py-1.5 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-100 hover:text-[#0282e5] transition-colors flex items-center gap-1">
+            <button type="button" className="px-3 py-1.5 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-100 hover:text-[#0282e5] transition-colors flex items-center gap-1">
               All Tools
               <span
                 className={`text-[11px] transition-transform ${dropdownOpen ? "rotate-180" : ""}`}
@@ -193,6 +194,8 @@ export default function Navbar() {
 
           {/* Mobile hamburger */}
           <button
+            type="button"
+            aria-label="Toggle mobile menu"
             className="lg:hidden ml-2 p-1.5"
             onClick={() => setMobileOpen(!mobileOpen)}
           >
