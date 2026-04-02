@@ -1,0 +1,15 @@
+@import "tailwindcss";
+
+:root {
+  --green: #00BB88;
+  --blue: #0282e5;
+  --blue-dark: #0170c9;
+  --blue-light: #41a1f0;
+  --orange: #e96e00;
+  --purple: #7c5cfc;
+  --dark: #1a1a2e;
+}
+
+body {
+  font-family: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, sans-serif;
+}
