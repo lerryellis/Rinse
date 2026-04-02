@@ -13,13 +13,21 @@ from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 
 from src.services.usage import get_supabase, PRICE_PER_FILE_GHS, record_usage
+from src.services.auth import require_user
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-PAYSTACK_SECRET = os.getenv("PAYSTACK_SECRET_KEY", "")
 PAYSTACK_BASE = "https://api.paystack.co"
+
+
+def _get_paystack_secret() -> str:
+    """Read Paystack secret at call time (not import time) so env vars are loaded."""
+    key = os.getenv("PAYSTACK_SECRET_KEY", "")
+    if not key:
+        raise HTTPException(status_code=500, detail="Paystack is not configured. Add PAYSTACK_SECRET_KEY to environment variables.")
+    return key
 
 
 class InitPaymentRequest(BaseModel):
@@ -41,77 +49,68 @@ class VerifyResponse(BaseModel):
     paid: bool
 
 
-def _get_ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
-
-
-def _extract_user_id(request: Request):
-    auth = request.headers.get("authorization", "")
-    if auth.startswith("Bearer "):
-        try:
-            import jwt
-            token = auth.split(" ", 1)[1]
-            payload = jwt.decode(token, options={"verify_signature": False})
-            return payload.get("sub")
-        except Exception:
-            pass
-    return None
-
-
 @router.post("/initialize", response_model=InitPaymentResponse)
 async def initialize_payment(request: Request, body: InitPaymentRequest):
     """Initialize a Paystack payment for a single file action."""
-    if not PAYSTACK_SECRET:
-        raise HTTPException(status_code=500, detail="Payment not configured")
-
-    user_id = _extract_user_id(request)
-    ip = _get_ip(request)
+    secret = _get_paystack_secret()
+    user_id = require_user(request)
 
     reference = f"rinse-{uuid.uuid4().hex[:12]}"
     amount_pesewas = int(PRICE_PER_FILE_GHS * 100)  # Paystack uses pesewas
 
-    # Determine email
+    # Get user email from profile
+    sb = get_supabase()
     email = body.email
-    if not email and user_id:
-        sb = get_supabase()
+    if not email:
         result = sb.table("profiles").select("email").eq("id", user_id).single().execute()
         if result.data:
             email = result.data.get("email")
     if not email:
-        email = "guest@rinse.dev"
+        raise HTTPException(status_code=400, detail="Email is required for payment")
+
+    # Build callback URL — use provided or derive from request origin
+    callback_url = body.callback_url
+    if not callback_url:
+        origin = request.headers.get("origin") or request.headers.get("referer", "")
+        if origin:
+            # Strip path from referer
+            from urllib.parse import urlparse
+            parsed = urlparse(origin)
+            callback_url = f"{parsed.scheme}://{parsed.netloc}/payment/verify"
+        else:
+            callback_url = "http://localhost:3000/payment/verify"
 
     payload = {
         "email": email,
         "amount": amount_pesewas,
         "currency": "GHS",
         "reference": reference,
-        "callback_url": body.callback_url or "http://localhost:3000/payment/verify",
+        "callback_url": callback_url,
         "metadata": {
             "tool": body.tool,
             "user_id": user_id,
-            "ip_address": ip,
         },
     }
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.post(
             f"{PAYSTACK_BASE}/transaction/initialize",
             json=payload,
-            headers={"Authorization": f"Bearer {PAYSTACK_SECRET}"},
+            headers={"Authorization": f"Bearer {secret}"},
         )
+
+    if resp.status_code != 200:
+        logger.error("Paystack init failed: %s %s", resp.status_code, resp.text)
+        raise HTTPException(status_code=502, detail="Payment service unavailable. Please try again.")
 
     data = resp.json()
     if not data.get("status"):
-        raise HTTPException(status_code=400, detail=data.get("message", "Payment init failed"))
+        logger.error("Paystack init error: %s", data.get("message"))
+        raise HTTPException(status_code=400, detail=data.get("message", "Payment initialization failed"))
 
     # Store pending payment
-    sb = get_supabase()
     sb.table("payments").insert({
         "user_id": user_id,
-        "ip_address": ip,
         "reference": reference,
         "amount_ghs": PRICE_PER_FILE_GHS,
         "status": "pending",
@@ -128,14 +127,16 @@ async def initialize_payment(request: Request, body: InitPaymentRequest):
 @router.get("/verify/{reference}", response_model=VerifyResponse)
 async def verify_payment(reference: str):
     """Verify a Paystack payment and mark it as successful."""
-    if not PAYSTACK_SECRET:
-        raise HTTPException(status_code=500, detail="Payment not configured")
+    secret = _get_paystack_secret()
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.get(
             f"{PAYSTACK_BASE}/transaction/verify/{reference}",
-            headers={"Authorization": f"Bearer {PAYSTACK_SECRET}"},
+            headers={"Authorization": f"Bearer {secret}"},
         )
+
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail="Could not verify payment with Paystack")
 
     data = resp.json()
     if not data.get("status"):
@@ -152,6 +153,14 @@ async def verify_payment(reference: str):
         "paystack_response": tx,
     }).eq("reference", reference).execute()
 
+    # Record paid usage if successful
+    if paid:
+        metadata = tx.get("metadata", {})
+        user_id = metadata.get("user_id")
+        tool = metadata.get("tool")
+        if user_id and tool:
+            record_usage(user_id, tool, 0, paid=True)
+
     return VerifyResponse(
         status="success" if paid else "failed",
         reference=reference,
@@ -163,14 +172,12 @@ async def verify_payment(reference: str):
 @router.post("/webhook")
 async def paystack_webhook(request: Request):
     """Paystack server-to-server webhook. Confirms payment even if user closes browser."""
-    if not PAYSTACK_SECRET:
-        raise HTTPException(status_code=500, detail="Payment not configured")
+    secret = _get_paystack_secret()
 
-    # Verify signature
     body = await request.body()
     signature = request.headers.get("x-paystack-signature", "")
     expected = hmac.new(
-        PAYSTACK_SECRET.encode("utf-8"),
+        secret.encode("utf-8"),
         body,
         hashlib.sha512,
     ).hexdigest()
@@ -185,7 +192,6 @@ async def paystack_webhook(request: Request):
 
     if event == "charge.success":
         reference = data.get("reference")
-        amount_ghs = data.get("amount", 0) / 100
         metadata = data.get("metadata", {})
         tool = metadata.get("tool")
         user_id = metadata.get("user_id")
@@ -195,23 +201,20 @@ async def paystack_webhook(request: Request):
 
         sb = get_supabase()
 
-        # Check if already processed (idempotency)
+        # Idempotency check
         existing = sb.table("payments").select("status").eq("reference", reference).single().execute()
         if existing.data and existing.data.get("status") == "success":
             return {"status": "already_processed"}
 
-        # Update payment record
         sb.table("payments").update({
             "status": "success",
             "paystack_response": data,
         }).eq("reference", reference).execute()
 
-        # Record as paid usage so the user gets their processing credit
         if user_id and tool:
             record_usage(user_id, tool, 0, paid=True)
 
         logger.info("Webhook: payment %s confirmed for user %s", reference, user_id)
         return {"status": "success"}
 
-    # Acknowledge other events without processing
     return {"status": "ignored", "event": event}

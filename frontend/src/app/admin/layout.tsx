@@ -24,13 +24,13 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       router.push("/auth/signin");
       return;
     }
-    if (profile && !profile.is_admin) {
+    // Wait for profile to load before checking admin status
+    if (!profile) return;
+    if (!profile.is_admin) {
       router.push("/");
       return;
     }
-    if (profile?.is_admin) {
-      setAuthorized(true);
-    }
+    setAuthorized(true);
   }, [user, profile, loading, router]);
 
   if (loading || !authorized) {
