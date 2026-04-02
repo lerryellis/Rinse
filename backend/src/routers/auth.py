@@ -3,7 +3,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from src.services.usage import get_usage_info
+from src.services.usage import get_usage_info, get_supabase
+from src.services.auth import require_user as _require_user
 
 router = APIRouter()
 
@@ -26,17 +27,19 @@ async def get_usage(request: Request):
     return UsageResponse(**info)
 
 
-def _require_user(request: Request) -> str:
-    auth = request.headers.get("authorization", "")
-    if not auth.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Sign in required")
-    try:
-        import jwt
-        token = auth.split(" ", 1)[1]
-        payload = jwt.decode(token, options={"verify_signature": False})
-        user_id = payload.get("sub")
-        if not user_id:
-            raise ValueError("No sub")
-        return user_id
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid session")
+class TrackDownloadRequest(BaseModel):
+    tool: str
+
+
+@router.post("/track-download")
+async def track_download(request: Request, body: TrackDownloadRequest):
+    """Record that a user downloaded a processed file."""
+    user_id = _require_user(request)
+    sb = get_supabase()
+    sb.table("usage").insert({
+        "user_id": user_id,
+        "tool": f"{body.tool}:download",
+        "file_size_bytes": 0,
+        "paid": False,
+    }).execute()
+    return {"status": "tracked"}

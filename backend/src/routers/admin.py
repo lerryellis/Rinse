@@ -177,7 +177,7 @@ async def update_user(request: Request, user_id: str):
     body = await request.json()
     sb = get_supabase()
 
-    allowed_fields = {"plan", "is_admin", "full_name"}
+    allowed_fields = {"plan", "is_admin", "full_name", "suspended", "suspended_reason"}
     updates = {k: v for k, v in body.items() if k in allowed_fields}
 
     if not updates:

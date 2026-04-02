@@ -71,6 +71,7 @@ export default function ToolPage({ slug, title, description, side }: ToolPagePro
   const [rotateAngle, setRotateAngle] = useState<RotationAngle>(90);
   const [pageInput, setPageInput] = useState("");
   const [pageCount, setPageCount] = useState(0);
+  const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
 
   const acceptMultiple = ["merge", "alternate"].includes(slug);
   const isHtmlTool = slug === "html-to-pdf";
@@ -162,13 +163,18 @@ export default function ToolPage({ slug, title, description, side }: ToolPagePro
     setResultMulti(null);
     setError(null);
 
-    // Get page count for single-file tools
-    if (!acceptMultiple && newFiles.length === 1 && newFiles[0].name.endsWith(".pdf")) {
-      try {
-        const count = await getPageCount(newFiles[0]);
-        setPageCount(count);
-      } catch {
-        setPageCount(0);
+    // Get page count and generate thumbnails for PDF files
+    for (const f of newFiles) {
+      if (f.name.endsWith(".pdf")) {
+        getPageCount(f).then((count) => {
+          if (!acceptMultiple) setPageCount(count);
+        }).catch(() => {});
+        // Generate thumbnail
+        import("@/lib/pdf/preview").then(({ generatePdfThumbnail }) => {
+          generatePdfThumbnail(f).then((url) => {
+            if (url) setThumbnails((prev) => ({ ...prev, [f.name + f.size]: url }));
+          });
+        }).catch(() => {});
       }
     }
   }, [acceptMultiple, files]);
@@ -191,33 +197,47 @@ export default function ToolPage({ slug, title, description, side }: ToolPagePro
     try {
       // ─── Client-side tools ───
       if (slug === "merge") {
-        const result = await mergePdfs(files);
+        if (files.length < 2) throw new Error("Select at least 2 PDFs to merge");
+        const result = await mergePdfs(files).catch(() => {
+          throw new Error("Failed to merge PDFs. One or more files may be corrupted or password-protected.");
+        });
         setResultData(result);
         setResultName("merged.pdf");
       } else if (slug === "split") {
         const opts: SplitOptions = splitMode === "ranges"
           ? { mode: "ranges", ranges: splitRanges }
           : { mode: "each" };
-        const results = await splitPdf(files[0], opts);
+        if (splitMode === "ranges" && !splitRanges.trim()) throw new Error("Enter page ranges to split (e.g. 1-3, 5, 7-10)");
+        const results = await splitPdf(files[0], opts).catch(() => {
+          throw new Error("Failed to split PDF. The file may be corrupted or password-protected.");
+        });
+        if (results.length === 0) throw new Error("No pages matched the specified ranges. Check your page numbers.");
         setResultMulti(results);
       } else if (slug === "rotate") {
-        const result = await rotatePdf(files[0], rotateAngle);
+        const result = await rotatePdf(files[0], rotateAngle).catch(() => {
+          throw new Error("Failed to rotate PDF. The file may be corrupted or password-protected.");
+        });
         setResultData(result);
         setResultName("rotated.pdf");
       } else if (slug === "delete-pages") {
         const pages = parsePageNumbers(pageInput);
-        if (pages.length === 0) throw new Error("Enter at least one page number to delete");
-        const result = await deletePages(files[0], pages);
+        if (pages.length === 0) throw new Error("Enter at least one page number to delete (e.g. 1, 3, 5-7)");
+        if (pageCount > 0 && pages.some((p) => p > pageCount)) throw new Error(`Invalid page number. This PDF only has ${pageCount} pages.`);
+        const result = await deletePages(files[0], pages).catch((e) => {
+          throw new Error(e.message || "Failed to delete pages. The file may be corrupted.");
+        });
         setResultData(result);
         setResultName("pages-deleted.pdf");
       } else if (slug === "extract") {
         const pages = parsePageNumbers(pageInput);
-        if (pages.length === 0) throw new Error("Enter at least one page number to extract");
-        const result = await extractPages(files[0], pages);
+        if (pages.length === 0) throw new Error("Enter at least one page number to extract (e.g. 1, 3, 5-7)");
+        if (pageCount > 0 && pages.some((p) => p > pageCount)) throw new Error(`Invalid page number. This PDF only has ${pageCount} pages.`);
+        const result = await extractPages(files[0], pages).catch((e) => {
+          throw new Error(e.message || "Failed to extract pages. The file may be corrupted.");
+        });
         setResultData(result);
         setResultName("extracted.pdf");
       } else if (side === "client") {
-        // Placeholder for other client tools
         await new Promise((r) => setTimeout(r, 1000));
         setResultData(new Uint8Array());
         setResultName("result.pdf");
@@ -336,6 +356,18 @@ export default function ToolPage({ slug, title, description, side }: ToolPagePro
       downloadZip(resultMulti);
     } else if (resultData) {
       downloadBlob(resultData, resultName);
+    }
+    // Track download
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    if (session?.access_token) {
+      fetch(`${apiUrl}/api/auth/track-download`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ tool: slug }),
+      }).catch(() => {});
     }
   };
 
@@ -607,11 +639,19 @@ export default function ToolPage({ slug, title, description, side }: ToolPagePro
             <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">
               {files.map((f, i) => (
                 <div key={i} className="flex items-center gap-3 px-4 py-3">
-                  <div className="w-10 h-10 rounded-lg bg-red-50 flex items-center justify-center shrink-0">
-                    <span className="text-xs font-bold text-red-400 uppercase">
-                      {f.name.split(".").pop()}
-                    </span>
-                  </div>
+                  {thumbnails[f.name + f.size] ? (
+                    <img
+                      src={thumbnails[f.name + f.size]}
+                      alt={`Preview of ${f.name}`}
+                      className="w-10 h-10 rounded-lg object-cover border border-gray-200 shrink-0"
+                    />
+                  ) : (
+                    <div className="w-10 h-10 rounded-lg bg-red-50 flex items-center justify-center shrink-0">
+                      <span className="text-xs font-bold text-red-400 uppercase">
+                        {f.name.split(".").pop()}
+                      </span>
+                    </div>
+                  )}
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-800 truncate">{f.name}</p>
                     <p className="text-xs text-gray-400">
@@ -650,6 +690,7 @@ export default function ToolPage({ slug, title, description, side }: ToolPagePro
               accept={acceptTypes}
               multiple={acceptMultiple}
               className="hidden"
+              aria-label="Upload file"
               onChange={(e) => handleFiles(e.target.files)}
             />
 

@@ -3,25 +3,9 @@ from fastapi.responses import StreamingResponse
 import io
 import fitz  # PyMuPDF
 from src.services.usage import check_limits, record_usage
+from src.services.auth import require_user
 
 router = APIRouter()
-
-
-def require_user(request: Request) -> str:
-    """Extract user_id from Supabase JWT. Raises 401 if not authenticated."""
-    auth = request.headers.get("authorization", "")
-    if not auth.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Sign in required to use this tool")
-    try:
-        import jwt
-        token = auth.split(" ", 1)[1]
-        payload = jwt.decode(token, options={"verify_signature": False})
-        user_id = payload.get("sub")
-        if not user_id:
-            raise ValueError("No sub in token")
-        return user_id
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid session. Please sign in again.")
 
 
 async def enforce_limits(request: Request, file_size: int, tool: str):
