@@ -845,27 +845,68 @@ export default function ToolPage({ slug, title, description, side }: ToolPagePro
               </div>
             )}
 
-            {/* Process button OR payment button (admins always get process button) */}
-            {!hasResult && usage?.needs_payment && !usage?.is_admin ? (
-              <button
-                type="button"
-                onClick={initiatePayment}
-                disabled={paymentLoading}
-                className="w-full py-4 rounded-xl bg-[#00BB88] text-white text-base font-bold hover:bg-[#00a87a] disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
-              >
-                {paymentLoading ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                    </svg>
-                    Redirecting to payment...
-                  </span>
-                ) : (
-                  <>Pay GHS {usage.price_per_file_ghs.toFixed(2)} &amp; {title}</>
+            {/* Action buttons */}
+            {!hasResult && !usage?.is_admin && (
+              <div className="space-y-2">
+                {/* Free process button — only when free uses remain */}
+                {usage && !usage.needs_payment && (
+                  <button
+                    type="button"
+                    onClick={handleProcess}
+                    disabled={processing}
+                    className="w-full py-4 rounded-xl bg-[#0282e5] text-white text-base font-bold hover:bg-[#0170c9] disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {processing ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                        </svg>
+                        Processing...
+                      </span>
+                    ) : (
+                      <>{title} (Free)</>
+                    )}
+                  </button>
                 )}
-              </button>
-            ) : !hasResult && (
+
+                {/* Pay button — ALWAYS visible for non-admins, primary when no free uses left */}
+                {usage && (
+                  <button
+                    type="button"
+                    onClick={initiatePayment}
+                    disabled={paymentLoading}
+                    className={`w-full py-4 rounded-xl text-white text-base font-bold disabled:opacity-60 disabled:cursor-not-allowed transition-colors ${
+                      usage.needs_payment
+                        ? "bg-[#00BB88] hover:bg-[#00a87a]"
+                        : "bg-gray-400 hover:bg-gray-500"
+                    }`}
+                  >
+                    {paymentLoading ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                        </svg>
+                        Redirecting to payment...
+                      </span>
+                    ) : (
+                      <>Pay GHS {usage.price_per_file_ghs.toFixed(2)} &amp; {title}</>
+                    )}
+                  </button>
+                )}
+
+                {/* Locked out message */}
+                {usage?.needs_payment && (
+                  <p className="text-xs text-center text-gray-400">
+                    Free uses exhausted{usage.resets_at ? ` · resets in ${formatTimeLeft(usage.resets_at)}` : ""}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Admin — always free process button */}
+            {!hasResult && usage?.is_admin && (
               <button
                 type="button"
                 onClick={handleProcess}
