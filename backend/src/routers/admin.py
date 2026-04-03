@@ -108,14 +108,87 @@ async def get_dashboard_stats(request: Request):
     }
 
 
+@router.get("/crm/segments")
+async def get_crm_segments(request: Request):
+    """Get user counts by segment: individuals, team members, API developers, admins, suspended."""
+    require_admin(request)
+    sb = get_supabase()
+
+    total = sb.table("profiles").select("id", count="exact").execute()
+    admins = sb.table("profiles").select("id", count="exact").eq("is_admin", True).execute()
+    suspended = sb.table("profiles").select("id", count="exact").eq("suspended", True).execute()
+    in_teams = sb.table("profiles").select("id", count="exact").not_.is_("team_id", "null").execute()
+    has_api_keys = sb.table("api_keys").select("user_id", count="exact").eq("active", True).execute()
+    paid_users = sb.table("payments").select("user_id", count="exact").eq("status", "success").execute()
+
+    total_count = total.count or 0
+    team_count = in_teams.count or 0
+    api_count = has_api_keys.count or 0
+    individual_count = total_count - team_count
+
+    return {
+        "total": total_count,
+        "segments": {
+            "individuals": individual_count,
+            "team_members": team_count,
+            "api_developers": api_count,
+            "paid_users": paid_users.count or 0,
+            "admins": admins.count or 0,
+            "suspended": suspended.count or 0,
+        },
+    }
+
+
+@router.get("/crm/teams")
+async def list_teams(request: Request, page: int = Query(1, ge=1), limit: int = Query(20, ge=1, le=50)):
+    """List all teams with member counts."""
+    require_admin(request)
+    sb = get_supabase()
+
+    offset = (page - 1) * limit
+    result = sb.table("teams").select("*, profiles!teams_owner_id_fkey(email, full_name)", count="exact").order("created_at", desc=True).range(offset, offset + limit - 1).execute()
+
+    teams = []
+    for team in (result.data or []):
+        members = sb.table("team_members").select("id", count="exact").eq("team_id", team["id"]).execute()
+        teams.append({**team, "member_count": members.count or 0})
+
+    return {"teams": teams, "total": result.count or 0, "page": page}
+
+
+@router.get("/crm/api-developers")
+async def list_api_developers(request: Request, page: int = Query(1, ge=1), limit: int = Query(20, ge=1, le=50)):
+    """List users with active API keys and their usage stats."""
+    require_admin(request)
+    sb = get_supabase()
+
+    offset = (page - 1) * limit
+    keys = sb.table("api_keys").select("user_id, name, key_prefix, last_used_at, created_at", count="exact").eq("active", True).order("created_at", desc=True).range(offset, offset + limit - 1).execute()
+
+    developers = []
+    for key in (keys.data or []):
+        profile = sb.table("profiles").select("email, full_name, plan").eq("id", key["user_id"]).single().execute()
+        api_usage = sb.table("usage").select("id", count="exact").eq("user_id", key["user_id"]).like("tool", "api:%").execute()
+        developers.append({
+            **key,
+            "email": profile.data.get("email", "") if profile.data else "",
+            "full_name": profile.data.get("full_name", "") if profile.data else "",
+            "plan": profile.data.get("plan", "free") if profile.data else "free",
+            "total_api_calls": api_usage.count or 0,
+        })
+
+    return {"developers": developers, "total": keys.count or 0, "page": page}
+
+
 @router.get("/users")
 async def list_users(
     request: Request,
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     search: Optional[str] = None,
+    segment: Optional[str] = None,
 ):
-    """List all users with pagination and search."""
+    """List users with pagination, search, and segment filter."""
     require_admin(request)
     sb = get_supabase()
 
@@ -124,6 +197,23 @@ async def list_users(
 
     if search:
         query = query.or_(f"email.ilike.%{search}%,full_name.ilike.%{search}%")
+
+    if segment == "team":
+        query = query.not_.is_("team_id", "null")
+    elif segment == "individual":
+        query = query.is_("team_id", "null")
+    elif segment == "admin":
+        query = query.eq("is_admin", True)
+    elif segment == "suspended":
+        query = query.eq("suspended", True)
+    elif segment == "paid":
+        # Get user IDs who have made payments
+        paid = sb.table("payments").select("user_id").eq("status", "success").execute()
+        paid_ids = list(set(p["user_id"] for p in (paid.data or []) if p["user_id"]))
+        if paid_ids:
+            query = query.in_("id", paid_ids)
+        else:
+            return {"users": [], "total": 0, "page": page, "limit": limit}
 
     result = query.range(offset, offset + limit - 1).execute()
 
