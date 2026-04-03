@@ -48,6 +48,9 @@ export const metadata: Metadata = {
     index: true,
     follow: true,
   },
+  other: {
+    "theme-color": "#0282e5",
+  },
 };
 
 export default function RootLayout({
@@ -57,7 +60,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${geistSans.variable} antialiased`}>
+      <head>
+        <link rel="manifest" href="/manifest.webmanifest" />
+        <link rel="apple-touch-icon" href="/icon-192.png" sizes="192x192" />
+      </head>
       <body className="min-h-screen flex flex-col bg-white text-gray-800">
+        <script dangerouslySetInnerHTML={{ __html: `if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js')}` }} />
         <ThemeProvider>
           <AuthProvider>
             <ToastProvider>

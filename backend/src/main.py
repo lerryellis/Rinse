@@ -10,7 +10,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import JSONResponse
 
-from src.routers import pdf_tools, auth, payments, admin, batch, analyze
+from src.routers import pdf_tools, auth, payments, admin, batch, analyze, developer
 from src.services.cleanup import cleanup_expired_files
 from src.services.rate_limit import check_rate_limit
 
@@ -66,6 +66,7 @@ app.include_router(payments.router, prefix="/api/payments", tags=["Payments"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
 app.include_router(batch.router, prefix="/api/batch", tags=["Batch"])
 app.include_router(analyze.router, prefix="/api/analyze", tags=["Analyze"])
+app.include_router(developer.router, prefix="/api/v1", tags=["Developer API"])
 
 
 @app.get("/")

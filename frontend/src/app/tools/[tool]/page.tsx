@@ -1,4 +1,6 @@
 import ToolPage from "@/components/ToolPage";
+import PdfEditor from "@/components/PdfEditor";
+import FillAndSign from "@/components/FillAndSign";
 
 const toolMeta: Record<string, { title: string; description: string; side: "client" | "server" }> = {
   edit: { title: "PDF Editor", description: "Edit text, images, and links in your PDF", side: "client" },
@@ -56,5 +58,7 @@ export default async function Page({ params }: { params: Promise<{ tool: string 
     );
   }
 
+  if (tool === "edit") return <PdfEditor />;
+  if (tool === "fill-sign") return <FillAndSign />;
   return <ToolPage slug={tool} title={meta.title} description={meta.description} side={meta.side} />;
 }
