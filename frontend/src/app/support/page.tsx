@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/components/Toast";
+import TicketChat from "@/components/TicketChat";
 import Link from "next/link";
 
 interface Ticket {
@@ -209,7 +210,7 @@ export default function SupportPage() {
         )
       )}
 
-      {/* Ticket detail */}
+      {/* Ticket detail with real-time chat */}
       {view === "detail" && selectedTicket && (
         <div className="space-y-4">
           <div className="bg-white rounded-xl border border-gray-200 p-5">
@@ -224,34 +225,9 @@ export default function SupportPage() {
             <p className="text-xs text-gray-400 mt-1">Opened {new Date(selectedTicket.created_at).toLocaleString()}</p>
           </div>
 
-          {/* Messages */}
-          <div className="space-y-3">
-            {messages.map((m) => (
-              <div key={m.id} className={`rounded-xl p-4 ${m.is_admin ? "bg-blue-50 border border-blue-200 ml-8" : "bg-white border border-gray-200 mr-8"}`}>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-xs font-semibold text-gray-700">{m.profiles?.full_name || m.profiles?.email || "You"}</span>
-                  {m.is_admin && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-200 text-blue-800">SUPPORT</span>}
-                  <span className="text-xs text-gray-400 ml-auto">{new Date(m.created_at).toLocaleString()}</span>
-                </div>
-                <p className="text-sm text-gray-600 whitespace-pre-wrap">{m.message}</p>
-              </div>
-            ))}
+          <div className="bg-white rounded-xl border border-gray-200 p-5">
+            <TicketChat ticketId={selectedTicket.id} ticketStatus={selectedTicket.status} isAdmin={false} />
           </div>
-
-          {/* Reply */}
-          {selectedTicket.status !== "closed" && (
-            <div className="flex gap-2">
-              <input type="text" value={reply} onChange={(e) => setReply(e.target.value)}
-                placeholder="Type your reply..."
-                onKeyDown={(e) => e.key === "Enter" && handleReply()}
-                className="flex-1 px-4 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:border-[#0282e5]"
-                aria-label="Reply message" />
-              <button type="button" onClick={handleReply} disabled={!reply.trim()}
-                className="px-5 py-2.5 rounded-lg bg-[#0282e5] text-white text-sm font-bold hover:bg-[#0170c9] disabled:opacity-60">
-                Send
-              </button>
-            </div>
-          )}
         </div>
       )}
     </div>
