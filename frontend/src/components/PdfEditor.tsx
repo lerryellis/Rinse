@@ -30,62 +30,86 @@ function downloadBlob(data: Uint8Array, filename: string) {
 }
 
 export default function PdfEditor() {
-  const { user, session } = useAuth();
+  const { user } = useAuth();
   const { toast } = useToast();
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
   const [file, setFile] = useState<File | null>(null);
-  const [pdfBytes, setPdfBytes] = useState<ArrayBuffer | null>(null);
+  const [pdfBytes, setPdfBytes] = useState<Uint8Array | null>(null);
   const [totalPages, setTotalPages] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [scale, setScale] = useState(1.2);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [tool, setTool] = useState<"select" | "text" | "image">("select");
+  const [activeTool, setActiveTool] = useState<"select" | "text" | "image">("select");
   const [saving, setSaving] = useState(false);
   const [pageSize, setPageSize] = useState({ width: 0, height: 0 });
+  const [renderError, setRenderError] = useState<string | null>(null);
+  const [pdfWorkerReady, setPdfWorkerReady] = useState(false);
+
+  // Initialize PDF.js worker once
+  useEffect(() => {
+    import("pdfjs-dist").then((pdfjsLib) => {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+      setPdfWorkerReady(true);
+    }).catch((err) => {
+      console.error("Failed to load PDF.js:", err);
+      setRenderError("Failed to load PDF renderer. Please refresh the page.");
+    });
+  }, []);
 
   // Render the current page
   const renderPage = useCallback(async (pageNum: number) => {
-    if (!pdfBytes || !canvasRef.current) return;
-    const pdfjsLib = await import("pdfjs-dist");
-    if (typeof window !== "undefined") {
-      pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+    if (!pdfBytes || !canvasRef.current || !pdfWorkerReady) return;
+    setRenderError(null);
+    try {
+      const pdfjsLib = await import("pdfjs-dist");
+      const pdf = await pdfjsLib.getDocument({ data: pdfBytes.slice(0) }).promise;
+      const page = await pdf.getPage(pageNum);
+      const viewport = page.getViewport({ scale });
+      const canvas = canvasRef.current;
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      setPageSize({ width: viewport.width, height: viewport.height });
+      const ctx = canvas.getContext("2d")!;
+
+      const renderTask = page.render({
+        canvasContext: ctx,
+        viewport,
+      } as any);
+      await renderTask.promise;
+    } catch (err) {
+      console.error("PDF render error:", err);
+      setRenderError("Failed to render this page. The PDF may be corrupted or unsupported.");
     }
-    const pdf = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
-    const page = await pdf.getPage(pageNum);
-    const viewport = page.getViewport({ scale });
-    const canvas = canvasRef.current;
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-    setPageSize({ width: viewport.width, height: viewport.height });
-    const ctx = canvas.getContext("2d")!;
-    await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
-  }, [pdfBytes, scale]);
+  }, [pdfBytes, scale, pdfWorkerReady]);
 
   useEffect(() => {
-    if (pdfBytes) renderPage(currentPage);
-  }, [pdfBytes, currentPage, scale, renderPage]);
+    if (pdfBytes && pdfWorkerReady) renderPage(currentPage);
+  }, [pdfBytes, currentPage, scale, renderPage, pdfWorkerReady]);
 
   const handleFileUpload = async (f: File) => {
-    const bytes = await f.arrayBuffer();
-    setPdfBytes(bytes);
-    setFile(f);
-    setAnnotations([]);
-    setCurrentPage(1);
-    const pdfjsLib = await import("pdfjs-dist");
-    if (typeof window !== "undefined") {
-      pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+    try {
+      const bytes = new Uint8Array(await f.arrayBuffer());
+      setPdfBytes(bytes);
+      setFile(f);
+      setAnnotations([]);
+      setCurrentPage(1);
+      setRenderError(null);
+
+      const pdfjsLib = await import("pdfjs-dist");
+      const pdf = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
+      setTotalPages(pdf.numPages);
+    } catch (err) {
+      console.error("Failed to load PDF:", err);
+      toast("Failed to load PDF. The file may be corrupted or password-protected.", "error");
     }
-    const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
-    setTotalPages(pdf.numPages);
   };
 
   const handleCanvasClick = (e: React.MouseEvent) => {
-    if (tool === "select") {
+    if (activeTool === "select") {
       setSelectedId(null);
       return;
     }
@@ -93,33 +117,21 @@ export default function PdfEditor() {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    if (tool === "text") {
+    if (activeTool === "text") {
       const id = `ann-${Date.now()}`;
       setAnnotations((prev) => [
         ...prev,
-        {
-          id,
-          type: "text",
-          page: currentPage,
-          x,
-          y,
-          width: 200,
-          height: 30,
-          content: "Edit text here",
-          fontSize: 16,
-          color: "#000000",
-        },
+        { id, type: "text", page: currentPage, x, y, width: 200, height: 30, content: "Edit text here", fontSize: 16, color: "#000000" },
       ]);
       setSelectedId(id);
-      setTool("select");
-    } else if (tool === "image") {
+      setActiveTool("select");
+    } else if (activeTool === "image") {
       imageInputRef.current?.click();
-      // Store click position for when image is selected
       (window as any).__rinseImagePos = { x, y };
     }
   };
 
-  const handleImageSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
     const imgFile = e.target.files?.[0];
     if (!imgFile) return;
     const reader = new FileReader();
@@ -128,20 +140,10 @@ export default function PdfEditor() {
       const id = `ann-${Date.now()}`;
       setAnnotations((prev) => [
         ...prev,
-        {
-          id,
-          type: "image",
-          page: currentPage,
-          x: pos.x,
-          y: pos.y,
-          width: 150,
-          height: 150,
-          content: imgFile.name,
-          imageData: reader.result as string,
-        },
+        { id, type: "image", page: currentPage, x: pos.x, y: pos.y, width: 150, height: 150, content: imgFile.name, imageData: reader.result as string },
       ]);
       setSelectedId(id);
-      setTool("select");
+      setActiveTool("select");
     };
     reader.readAsDataURL(imgFile);
     e.target.value = "";
@@ -156,7 +158,6 @@ export default function PdfEditor() {
     setSelectedId(null);
   };
 
-  // Save: apply annotations to PDF and download
   const handleSave = async () => {
     if (!pdfBytes) return;
     setSaving(true);
@@ -167,7 +168,6 @@ export default function PdfEditor() {
       for (const ann of annotations) {
         const page = pdfDoc.getPage(ann.page - 1);
         const { height: pageHeight } = page.getSize();
-        // Convert screen coords to PDF coords (flip Y, account for scale)
         const pdfX = ann.x / scale;
         const pdfY = pageHeight - (ann.y / scale) - (ann.height / scale);
 
@@ -176,27 +176,28 @@ export default function PdfEditor() {
           const r = parseInt(colorHex.slice(1, 3), 16) / 255;
           const g = parseInt(colorHex.slice(3, 5), 16) / 255;
           const b = parseInt(colorHex.slice(5, 7), 16) / 255;
-
           page.drawText(ann.content, {
-            x: pdfX,
-            y: pdfY,
-            size: (ann.fontSize || 16) / scale * scale,
+            x: pdfX, y: pdfY,
+            size: (ann.fontSize || 16),
             font: helvetica,
             color: rgb(r, g, b),
           });
         } else if (ann.type === "image" && ann.imageData) {
-          let img;
-          if (ann.imageData.includes("image/png")) {
-            img = await pdfDoc.embedPng(ann.imageData);
-          } else {
-            img = await pdfDoc.embedJpg(ann.imageData);
+          try {
+            let img;
+            if (ann.imageData.includes("image/png")) {
+              img = await pdfDoc.embedPng(ann.imageData);
+            } else {
+              img = await pdfDoc.embedJpg(ann.imageData);
+            }
+            page.drawImage(img, {
+              x: pdfX, y: pdfY,
+              width: ann.width / scale,
+              height: ann.height / scale,
+            });
+          } catch {
+            console.warn("Failed to embed image:", ann.content);
           }
-          page.drawImage(img, {
-            x: pdfX,
-            y: pdfY,
-            width: ann.width / scale,
-            height: ann.height / scale,
-          });
         }
       }
 
@@ -204,6 +205,7 @@ export default function PdfEditor() {
       downloadBlob(saved, `edited-${file?.name || "document.pdf"}`);
       toast("PDF saved with edits!", "success");
     } catch (err) {
+      console.error("Save error:", err);
       toast("Failed to save PDF. Try again.", "error");
     } finally {
       setSaving(false);
@@ -237,6 +239,8 @@ export default function PdfEditor() {
           <div
             className="border-2 border-dashed border-gray-300 rounded-2xl p-12 text-center cursor-pointer hover:border-[#0282e5] hover:bg-blue-50/30 transition-colors"
             onClick={() => fileInputRef.current?.click()}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files[0]) handleFileUpload(e.dataTransfer.files[0]); }}
           >
             <input ref={fileInputRef} type="file" accept=".pdf" className="hidden" aria-label="Upload PDF to edit" onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0])} />
             <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-blue-100 flex items-center justify-center">
@@ -257,18 +261,18 @@ export default function PdfEditor() {
       {/* Toolbar */}
       <div className="bg-white border-b border-gray-200 px-4 py-2 flex items-center gap-2 flex-wrap">
         <div className="flex items-center gap-1 border-r border-gray-200 pr-3 mr-1">
-          <button type="button" onClick={() => setTool("select")}
-            className={`p-2 rounded-lg text-sm ${tool === "select" ? "bg-[#0282e5] text-white" : "text-gray-600 hover:bg-gray-100"}`}>
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" /></svg>
-          </button>
-          <button type="button" onClick={() => setTool("text")}
-            className={`p-2 rounded-lg text-sm ${tool === "text" ? "bg-[#0282e5] text-white" : "text-gray-600 hover:bg-gray-100"}`}>
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-          </button>
-          <button type="button" onClick={() => setTool("image")}
-            className={`p-2 rounded-lg text-sm ${tool === "image" ? "bg-[#0282e5] text-white" : "text-gray-600 hover:bg-gray-100"}`}>
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-          </button>
+          {([
+            { id: "select", icon: "M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5", label: "Select" },
+            { id: "text", icon: "M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z", label: "Add Text" },
+            { id: "image", icon: "M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z", label: "Add Image" },
+          ] as const).map((t) => (
+            <button key={t.id} type="button" title={t.label} onClick={() => setActiveTool(t.id as any)}
+              className={`p-2 rounded-lg text-sm ${activeTool === t.id ? "bg-[#0282e5] text-white" : "text-gray-600 hover:bg-gray-100"}`}>
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={t.icon} />
+              </svg>
+            </button>
+          ))}
         </div>
 
         <input ref={imageInputRef} type="file" accept="image/*" className="hidden" aria-label="Upload image" onChange={handleImageSelected} />
@@ -293,7 +297,7 @@ export default function PdfEditor() {
           <button type="button" onClick={() => setScale((s) => Math.min(3, s + 0.2))} className="p-1.5 rounded text-gray-500 hover:bg-gray-100 text-xs font-bold">+</button>
         </div>
 
-        {/* Selected annotation props */}
+        {/* Selected text props */}
         {selected?.type === "text" && (
           <div className="flex items-center gap-2 border-r border-gray-200 pr-3 mr-1">
             <input type="number" value={selected.fontSize || 16} min={8} max={72}
@@ -307,7 +311,7 @@ export default function PdfEditor() {
 
         {selected && (
           <button type="button" onClick={() => deleteAnnotation(selected.id)}
-            className="p-2 rounded-lg text-red-500 hover:bg-red-50 text-sm">
+            className="p-2 rounded-lg text-red-500 hover:bg-red-50 text-sm" title="Delete">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
           </button>
         )}
@@ -317,84 +321,105 @@ export default function PdfEditor() {
             className="px-4 py-2 rounded-lg bg-[#00BB88] text-white text-sm font-bold hover:bg-[#00a87a] disabled:opacity-60 transition-colors">
             {saving ? "Saving..." : "Save & Download"}
           </button>
-          <button type="button" onClick={() => { setFile(null); setPdfBytes(null); setAnnotations([]); }}
+          <button type="button" onClick={() => { setFile(null); setPdfBytes(null); setAnnotations([]); setRenderError(null); }}
             className="px-3 py-2 rounded-lg text-sm text-gray-500 hover:bg-gray-100">New File</button>
         </div>
       </div>
 
       {/* Canvas area */}
-      <div ref={containerRef} className="flex-1 overflow-auto bg-gray-100 flex items-start justify-center p-6">
-        <div className="relative shadow-lg" style={{ width: pageSize.width || "auto", height: pageSize.height || "auto" }}>
-          <canvas
-            ref={canvasRef}
-            onClick={handleCanvasClick}
-            className={`block ${tool === "text" ? "cursor-text" : tool === "image" ? "cursor-crosshair" : "cursor-default"}`}
-          />
+      <div className="flex-1 overflow-auto bg-gray-100 flex items-start justify-center p-6">
+        {renderError ? (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-8 text-center max-w-md">
+            <p className="text-red-600 font-medium mb-2">Render Error</p>
+            <p className="text-sm text-red-500">{renderError}</p>
+            <button type="button" onClick={() => renderPage(currentPage)} className="mt-4 px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-bold">Retry</button>
+          </div>
+        ) : (
+          <div className="relative shadow-lg bg-white" style={{ width: pageSize.width || "auto", height: pageSize.height || "auto" }}>
+            <canvas
+              ref={canvasRef}
+              onClick={handleCanvasClick}
+              className={`block ${activeTool === "text" ? "cursor-text" : activeTool === "image" ? "cursor-crosshair" : "cursor-default"}`}
+            />
 
-          {/* Annotation overlays */}
-          {pageAnnotations.map((ann) => (
-            <div
-              key={ann.id}
-              onClick={(e) => { e.stopPropagation(); setSelectedId(ann.id); setTool("select"); }}
-              style={{
-                position: "absolute",
-                left: ann.x,
-                top: ann.y,
-                width: ann.width,
-                height: ann.type === "text" ? "auto" : ann.height,
-                minHeight: 20,
-              }}
-              className={`group ${selectedId === ann.id ? "ring-2 ring-[#0282e5] ring-offset-1" : "hover:ring-1 hover:ring-blue-300"}`}
-            >
-              {ann.type === "text" ? (
-                <textarea
-                  value={ann.content}
-                  onChange={(e) => updateAnnotation(ann.id, { content: e.target.value })}
-                  style={{ fontSize: ann.fontSize, color: ann.color, width: ann.width }}
-                  className="bg-transparent border-none outline-none resize-both overflow-hidden p-0 m-0 leading-tight"
-                  aria-label="Text annotation"
-                  onMouseDown={(e) => e.stopPropagation()}
-                />
-              ) : ann.imageData ? (
-                <img
-                  src={ann.imageData}
-                  alt={ann.content}
-                  className="w-full h-full object-contain pointer-events-none"
-                  draggable={false}
-                />
-              ) : null}
+            {/* Annotation overlays */}
+            {pageAnnotations.map((ann) => (
+              <div
+                key={ann.id}
+                onClick={(e) => { e.stopPropagation(); setSelectedId(ann.id); setActiveTool("select"); }}
+                onMouseDown={(e) => {
+                  if (selectedId !== ann.id) return;
+                  e.stopPropagation();
+                  const startX = e.clientX;
+                  const startY = e.clientY;
+                  const startAnnX = ann.x;
+                  const startAnnY = ann.y;
+                  const onMove = (ev: MouseEvent) => {
+                    updateAnnotation(ann.id, {
+                      x: startAnnX + (ev.clientX - startX),
+                      y: startAnnY + (ev.clientY - startY),
+                    });
+                  };
+                  const onUp = () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+                  window.addEventListener("mousemove", onMove);
+                  window.addEventListener("mouseup", onUp);
+                }}
+                style={{
+                  position: "absolute",
+                  left: ann.x,
+                  top: ann.y,
+                  width: ann.width,
+                  height: ann.type === "text" ? "auto" : ann.height,
+                  minHeight: 20,
+                  cursor: selectedId === ann.id ? "move" : "pointer",
+                }}
+                className={`${selectedId === ann.id ? "ring-2 ring-[#0282e5] ring-offset-1" : "hover:ring-1 hover:ring-blue-300"}`}
+              >
+                {ann.type === "text" ? (
+                  <textarea
+                    value={ann.content}
+                    onChange={(e) => updateAnnotation(ann.id, { content: e.target.value })}
+                    style={{ fontSize: ann.fontSize, color: ann.color, width: ann.width }}
+                    className="bg-transparent border-none outline-none resize-both overflow-hidden p-0 m-0 leading-tight"
+                    aria-label="Text annotation"
+                    onMouseDown={(e) => e.stopPropagation()}
+                  />
+                ) : ann.imageData ? (
+                  <img src={ann.imageData} alt={ann.content} className="w-full h-full object-contain pointer-events-none" draggable={false} />
+                ) : null}
 
-              {/* Resize handle */}
-              {selectedId === ann.id && (
-                <div
-                  className="absolute -bottom-1 -right-1 w-3 h-3 bg-[#0282e5] rounded-sm cursor-se-resize"
-                  onMouseDown={(e) => {
-                    e.stopPropagation();
-                    const startX = e.clientX;
-                    const startY = e.clientY;
-                    const startW = ann.width;
-                    const startH = ann.height;
-                    const onMove = (ev: MouseEvent) => {
-                      updateAnnotation(ann.id, {
-                        width: Math.max(40, startW + (ev.clientX - startX)),
-                        height: Math.max(20, startH + (ev.clientY - startY)),
-                      });
-                    };
-                    const onUp = () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
-                    window.addEventListener("mousemove", onMove);
-                    window.addEventListener("mouseup", onUp);
-                  }}
-                />
-              )}
-            </div>
-          ))}
-        </div>
+                {/* Resize handle */}
+                {selectedId === ann.id && (
+                  <div
+                    className="absolute -bottom-1 -right-1 w-3 h-3 bg-[#0282e5] rounded-sm cursor-se-resize"
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      const startX = e.clientX;
+                      const startY = e.clientY;
+                      const startW = ann.width;
+                      const startH = ann.height;
+                      const onMove = (ev: MouseEvent) => {
+                        updateAnnotation(ann.id, {
+                          width: Math.max(40, startW + (ev.clientX - startX)),
+                          height: Math.max(20, startH + (ev.clientY - startY)),
+                        });
+                      };
+                      const onUp = () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+                      window.addEventListener("mousemove", onMove);
+                      window.addEventListener("mouseup", onUp);
+                    }}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Status bar */}
       <div className="bg-white border-t border-gray-200 px-4 py-1.5 flex items-center justify-between text-xs text-gray-400">
         <span>{file.name} &middot; {totalPages} pages</span>
-        <span>{annotations.length} annotation{annotations.length !== 1 ? "s" : ""}</span>
+        <span>{annotations.length} annotation{annotations.length !== 1 ? "s" : ""} &middot; {activeTool === "text" ? "Click to add text" : activeTool === "image" ? "Click to place image" : "Select annotations"}</span>
       </div>
     </div>
   );
