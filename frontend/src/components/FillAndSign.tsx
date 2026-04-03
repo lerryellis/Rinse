@@ -54,7 +54,7 @@ export default function FillAndSign() {
     if (!pdfBytes || !canvasRef.current) return;
     const pdfjsLib = await import("pdfjs-dist");
     if (typeof window !== "undefined") {
-      pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+      pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
     }
     const pdf = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
     const page = await pdf.getPage(pageNum);
@@ -64,7 +64,7 @@ export default function FillAndSign() {
     canvas.height = viewport.height;
     setPageSize({ width: viewport.width, height: viewport.height });
     const ctx = canvas.getContext("2d")!;
-    await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
+    await page.render({ canvas, viewport } as any).promise;
   }, [pdfBytes, scale]);
 
   useEffect(() => {
@@ -79,7 +79,7 @@ export default function FillAndSign() {
     setCurrentPage(1);
     const pdfjsLib = await import("pdfjs-dist");
     if (typeof window !== "undefined") {
-      pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+      pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
     }
     const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
     setTotalPages(pdf.numPages);
@@ -298,12 +298,12 @@ export default function FillAndSign() {
         <div className="border-l border-gray-200 h-6 mx-1" />
 
         {/* Page nav */}
-        <button type="button" disabled={currentPage <= 1} onClick={() => setCurrentPage((p) => p - 1)}
+        <button type="button" title="Previous page" disabled={currentPage <= 1} onClick={() => setCurrentPage((p) => p - 1)}
           className="p-1.5 rounded text-gray-500 hover:bg-gray-100 disabled:opacity-30">
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
         </button>
         <span className="text-sm text-gray-600 min-w-[60px] text-center">{currentPage} / {totalPages}</span>
-        <button type="button" disabled={currentPage >= totalPages} onClick={() => setCurrentPage((p) => p + 1)}
+        <button type="button" title="Next page" disabled={currentPage >= totalPages} onClick={() => setCurrentPage((p) => p + 1)}
           className="p-1.5 rounded text-gray-500 hover:bg-gray-100 disabled:opacity-30">
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
         </button>
@@ -311,7 +311,7 @@ export default function FillAndSign() {
         {selected && (
           <>
             <div className="border-l border-gray-200 h-6 mx-1" />
-            <button type="button" onClick={() => deletePlacement(selected.id)} className="p-2 rounded-lg text-red-500 hover:bg-red-50">
+            <button type="button" title="Delete selection" onClick={() => deletePlacement(selected.id)} className="p-2 rounded-lg text-red-500 hover:bg-red-50">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
             </button>
           </>

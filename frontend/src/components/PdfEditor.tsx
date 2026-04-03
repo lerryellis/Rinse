@@ -52,7 +52,8 @@ export default function PdfEditor() {
   // Initialize PDF.js worker once
   useEffect(() => {
     import("pdfjs-dist").then((pdfjsLib) => {
-      pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+      // Worker served from /public — guaranteed to match installed version
+      pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
       setPdfWorkerReady(true);
     }).catch((err) => {
       console.error("Failed to load PDF.js:", err);
@@ -66,23 +67,40 @@ export default function PdfEditor() {
     setRenderError(null);
     try {
       const pdfjsLib = await import("pdfjs-dist");
-      const pdf = await pdfjsLib.getDocument({ data: pdfBytes.slice(0) }).promise;
+      const dataCopy = pdfBytes.slice(0);
+      const pdf = await pdfjsLib.getDocument({ data: dataCopy }).promise;
       const page = await pdf.getPage(pageNum);
       const viewport = page.getViewport({ scale });
       const canvas = canvasRef.current;
       canvas.width = viewport.width;
       canvas.height = viewport.height;
       setPageSize({ width: viewport.width, height: viewport.height });
-      const ctx = canvas.getContext("2d")!;
 
+      // PDF.js v5: use canvas parameter (preferred), fallback to canvasContext
       const renderTask = page.render({
-        canvasContext: ctx,
+        canvas,
         viewport,
       } as any);
       await renderTask.promise;
     } catch (err) {
       console.error("PDF render error:", err);
-      setRenderError("Failed to render this page. The PDF may be corrupted or unsupported.");
+      // Retry with canvasContext fallback for older browser support
+      try {
+        const pdfjsLib = await import("pdfjs-dist");
+        const dataCopy = pdfBytes.slice(0);
+        const pdf = await pdfjsLib.getDocument({ data: dataCopy }).promise;
+        const page = await pdf.getPage(pageNum);
+        const viewport = page.getViewport({ scale });
+        const canvas = canvasRef.current!;
+        const ctx = canvas.getContext("2d")!;
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        setPageSize({ width: viewport.width, height: viewport.height });
+        await page.render({ canvasContext: ctx, viewport } as any).promise;
+      } catch (retryErr) {
+        console.error("PDF render retry failed:", retryErr);
+        setRenderError(`Failed to render page ${pageNum}. Error: ${retryErr instanceof Error ? retryErr.message : "Unknown error"}`);
+      }
     }
   }, [pdfBytes, scale, pdfWorkerReady]);
 
@@ -292,9 +310,9 @@ export default function PdfEditor() {
 
         {/* Zoom */}
         <div className="flex items-center gap-1 border-r border-gray-200 pr-3 mr-1">
-          <button type="button" onClick={() => setScale((s) => Math.max(0.5, s - 0.2))} className="p-1.5 rounded text-gray-500 hover:bg-gray-100 text-xs font-bold">-</button>
+          <button type="button" title="Zoom out" onClick={() => setScale((s) => Math.max(0.5, s - 0.2))} className="p-1.5 rounded text-gray-500 hover:bg-gray-100 text-xs font-bold">-</button>
           <span className="text-xs text-gray-500 min-w-[40px] text-center">{Math.round(scale * 100)}%</span>
-          <button type="button" onClick={() => setScale((s) => Math.min(3, s + 0.2))} className="p-1.5 rounded text-gray-500 hover:bg-gray-100 text-xs font-bold">+</button>
+          <button type="button" title="Zoom in" onClick={() => setScale((s) => Math.min(3, s + 0.2))} className="p-1.5 rounded text-gray-500 hover:bg-gray-100 text-xs font-bold">+</button>
         </div>
 
         {/* Selected text props */}
