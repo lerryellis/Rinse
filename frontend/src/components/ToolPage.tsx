@@ -23,6 +23,7 @@ interface UsageInfo {
   needs_payment: boolean;
   price_per_file_ghs: number;
   resets_at: string | null;
+  is_admin?: boolean;
 }
 
 function formatTimeLeft(resetsAt: string): string {
@@ -52,7 +53,7 @@ function downloadZip(files: { name: string; data: Uint8Array }[]) {
 }
 
 export default function ToolPage({ slug, title, description, side }: ToolPageProps) {
-  const { user, session, emailVerified } = useAuth();
+  const { user, session, emailVerified, profile } = useAuth();
   const { toast } = useToast();
   const [files, setFiles] = useState<File[]>([]);
   const [processing, setProcessing] = useState(false);
@@ -458,8 +459,8 @@ export default function ToolPage({ slug, title, description, side }: ToolPagePro
               </a>
             </div>
           </div>
-        ) : user && !emailVerified ? (
-          /* ─── Email verification gate ─── */
+        ) : user && !emailVerified && !profile?.is_admin ? (
+          /* ─── Email verification gate (skipped for admins) ─── */
           <div className="border-2 border-dashed border-amber-300 rounded-2xl p-12 text-center bg-amber-50">
             <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-amber-100 flex items-center justify-center">
               <svg className="w-8 h-8 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -827,7 +828,7 @@ export default function ToolPage({ slug, title, description, side }: ToolPagePro
             )}
 
             {/* Usage info banner */}
-            {!hasResult && usage && (
+            {!hasResult && usage && !usage.is_admin && (
               <div className={`p-3 rounded-xl text-sm text-center ${usage.needs_payment ? "bg-amber-50 border border-amber-200 text-amber-700" : "bg-blue-50 border border-blue-200 text-blue-700"}`}>
                 {usage.needs_payment ? (
                   <>
@@ -844,8 +845,8 @@ export default function ToolPage({ slug, title, description, side }: ToolPagePro
               </div>
             )}
 
-            {/* Process button OR payment button */}
-            {!hasResult && usage?.needs_payment ? (
+            {/* Process button OR payment button (admins always get process button) */}
+            {!hasResult && usage?.needs_payment && !usage?.is_admin ? (
               <button
                 type="button"
                 onClick={initiatePayment}

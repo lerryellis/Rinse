@@ -149,8 +149,20 @@ def get_effective_limit(user_id: str) -> int:
     return FREE_LIMIT + get_bonus_conversions(user_id)
 
 
+def _is_admin(user_id: str) -> bool:
+    """Check if user is admin. Admins bypass all limits."""
+    sb = get_supabase()
+    result = sb.table("profiles").select("is_admin").eq("id", user_id).single().execute()
+    if result.data:
+        return result.data.get("is_admin", False)
+    return False
+
+
 def check_limits(user_id: str, file_size: int, device_id: Optional[str] = None) -> Optional[str]:
-    """Returns an error message if limits exceeded, or None if OK."""
+    """Returns an error message if limits exceeded, or None if OK. Admins bypass all limits."""
+    if _is_admin(user_id):
+        return None
+
     if file_size > MAX_FILE_BYTES:
         max_mb = MAX_FILE_BYTES // (1024 * 1024)
         return "File too large. Maximum file size is %d MB." % max_mb
@@ -166,6 +178,21 @@ def check_limits(user_id: str, file_size: int, device_id: Optional[str] = None) 
 def get_usage_info(user_id: str, device_id: Optional[str] = None) -> dict:
     if device_id:
         link_device(user_id, device_id)
+
+    admin = _is_admin(user_id)
+
+    # Admins get unlimited everything
+    if admin:
+        return {
+            "total_used": 0,
+            "free_limit": 999999,
+            "free_remaining": 999999,
+            "needs_payment": False,
+            "price_per_file_ghs": 0,
+            "resets_at": None,
+            "bonus_conversions": 0,
+            "is_admin": True,
+        }
 
     used = get_effective_usage(user_id, device_id)
     limit = get_effective_limit(user_id)
@@ -189,4 +216,5 @@ def get_usage_info(user_id: str, device_id: Optional[str] = None) -> dict:
         "price_per_file_ghs": PRICE_PER_FILE_GHS,
         "resets_at": resets_at,
         "bonus_conversions": bonus,
+        "is_admin": False,
     }

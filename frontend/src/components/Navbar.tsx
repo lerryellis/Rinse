@@ -190,8 +190,12 @@ export default function Navbar() {
                   <div className="px-3 py-2 border-b border-gray-100">
                     <p className="text-xs text-gray-400">Signed in as</p>
                     <p className="text-sm font-medium text-gray-800 truncate">{user.email}</p>
-                    <span className="inline-block mt-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-blue-100 text-[#0282e5]">
-                      {profile?.plan || "free"}
+                    <span className={`inline-block mt-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                      profile?.is_admin
+                        ? "bg-purple-100 text-[#7c5cfc]"
+                        : "bg-blue-100 text-[#0282e5]"
+                    }`}>
+                      {profile?.is_admin ? "admin" : profile?.plan || "free"}
                     </span>
                   </div>
                   <Link

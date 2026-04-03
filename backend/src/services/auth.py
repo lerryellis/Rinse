@@ -22,9 +22,18 @@ def require_user(request: Request) -> str:
 
     # Check if suspended
     sb = get_supabase()
-    result = sb.table("profiles").select("suspended, suspended_reason").eq("id", user_id).single().execute()
+    result = sb.table("profiles").select("suspended, suspended_reason, is_admin").eq("id", user_id).single().execute()
     if result.data and result.data.get("suspended"):
         reason = result.data.get("suspended_reason") or "Contact support for more information."
         raise HTTPException(status_code=403, detail=f"Your account has been suspended. {reason}")
 
     return user_id
+
+
+def is_user_admin(user_id: str) -> bool:
+    """Check if a user has admin privileges."""
+    sb = get_supabase()
+    result = sb.table("profiles").select("is_admin").eq("id", user_id).single().execute()
+    if result.data:
+        return result.data.get("is_admin", False)
+    return False
