@@ -43,3 +43,19 @@ async def track_download(request: Request, body: TrackDownloadRequest):
         "paid": False,
     }).execute()
     return {"status": "tracked"}
+
+
+@router.get("/history")
+async def get_history(request: Request):
+    """Get user's processing history (last 100 records)."""
+    user_id = _require_user(request)
+    sb = get_supabase()
+    result = (
+        sb.table("usage")
+        .select("id, tool, file_size_bytes, paid, created_at")
+        .eq("user_id", user_id)
+        .order("created_at", desc=True)
+        .limit(100)
+        .execute()
+    )
+    return {"records": result.data or []}

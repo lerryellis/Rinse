@@ -7,6 +7,7 @@ import { rotatePdf, type RotationAngle } from "@/lib/pdf/rotate";
 import { deletePages } from "@/lib/pdf/delete-pages";
 import { extractPages } from "@/lib/pdf/extract";
 import { useAuth } from "@/context/AuthContext";
+import { useToast } from "@/components/Toast";
 
 interface ToolPageProps {
   slug: string;
@@ -52,6 +53,7 @@ function downloadZip(files: { name: string; data: Uint8Array }[]) {
 
 export default function ToolPage({ slug, title, description, side }: ToolPageProps) {
   const { user, session, emailVerified } = useAuth();
+  const { toast } = useToast();
   const [files, setFiles] = useState<File[]>([]);
   const [processing, setProcessing] = useState(false);
   const [resultData, setResultData] = useState<Uint8Array | Blob | null>(null);
@@ -60,10 +62,12 @@ export default function ToolPage({ slug, title, description, side }: ToolPagePro
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dragIndexRef = useRef<number | null>(null);
 
   // Usage & payment state
   const [usage, setUsage] = useState<UsageInfo | null>(null);
   const [paymentLoading, setPaymentLoading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
 
   // Tool-specific options
   const [splitMode, setSplitMode] = useState<"each" | "ranges">("each");
@@ -312,42 +316,67 @@ export default function ToolPage({ slug, title, description, side }: ToolPagePro
         };
 
         const endpoint = endpointMap[slug] || slug;
-        const fetchHeaders: Record<string, string> = {};
+        const headers: Record<string, string> = {};
         if (session?.access_token) {
-          fetchHeaders["Authorization"] = `Bearer ${session.access_token}`;
+          headers["Authorization"] = `Bearer ${session.access_token}`;
         }
         try {
           const { getDeviceId } = await import("@/lib/fingerprint");
-          fetchHeaders["X-Device-Id"] = await getDeviceId();
+          headers["X-Device-Id"] = await getDeviceId();
         } catch {}
-        const res = await fetch(`${apiUrl}/api/pdf/${endpoint}`, {
-          method: "POST",
-          headers: fetchHeaders,
-          body: formData,
+
+        // Use XMLHttpRequest for upload progress
+        const url = `${apiUrl}/api/pdf/${endpoint}`;
+        const { blob: responseBlob, contentType } = await new Promise<{ blob: Blob; contentType: string }>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open("POST", url);
+          xhr.responseType = "blob";
+          Object.entries(headers).forEach(([k, v]) => xhr.setRequestHeader(k, v));
+
+          xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable) {
+              setUploadProgress(Math.round((e.loaded / e.total) * 100));
+            }
+          };
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              resolve({ blob: xhr.response, contentType: xhr.getResponseHeader("content-type") || "" });
+            } else {
+              // Try to parse error from blob
+              const reader = new FileReader();
+              reader.onload = () => {
+                try {
+                  const err = JSON.parse(reader.result as string);
+                  reject(new Error(err.detail || "Processing failed"));
+                } catch {
+                  reject(new Error("Processing failed"));
+                }
+              };
+              reader.onerror = () => reject(new Error("Processing failed"));
+              reader.readAsText(xhr.response);
+            }
+          };
+          xhr.onerror = () => reject(new Error("Network error. Check your connection."));
+          xhr.send(formData);
         });
 
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({ detail: "Processing failed" }));
-          throw new Error(err.detail);
-        }
-
-        const contentType = res.headers.get("content-type") || "";
-        if (contentType.includes("application/pdf") || contentType.includes("application/octet-stream")) {
-          const blob = await res.blob();
-          setResultData(blob);
-          const ext = slug.includes("word") ? ".docx" : slug.includes("excel") ? ".xlsx" : slug.includes("jpg") ? ".zip" : ".pdf";
+        if (contentType.includes("application/pdf") || contentType.includes("application/octet-stream") || contentType.includes("application/zip") || contentType.includes("application/vnd.")) {
+          setResultData(responseBlob);
+          const ext = slug.includes("word") ? ".docx" : slug.includes("excel") ? ".xlsx" : slug.includes("jpg") ? ".zip" : slug.includes("text") ? ".txt" : ".pdf";
           setResultName(`${slug}-result${ext}`);
+          toast("File processed successfully!", "success");
         } else {
-          // JSON response (stub endpoints)
-          const json = await res.json();
           setResultData(new Uint8Array());
           setResultName("result.pdf");
         }
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Something went wrong");
+      const msg = e instanceof Error ? e.message : "Something went wrong";
+      setError(msg);
+      toast(msg, "error");
     } finally {
       setProcessing(false);
+      setUploadProgress(0);
     }
   };
 
@@ -635,10 +664,33 @@ export default function ToolPage({ slug, title, description, side }: ToolPagePro
           </div>
         ) : (
           <div className="space-y-4">
-            {/* File list */}
+            {/* File list (drag-to-reorder for merge/alternate) */}
             <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">
               {files.map((f, i) => (
-                <div key={i} className="flex items-center gap-3 px-4 py-3">
+                <div
+                  key={f.name + f.size + i}
+                  draggable={acceptMultiple}
+                  onDragStart={(e) => { if (acceptMultiple) { e.dataTransfer.effectAllowed = "move"; dragIndexRef.current = i; } }}
+                  onDragOver={(e) => { if (acceptMultiple) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; } }}
+                  onDrop={(e) => {
+                    if (!acceptMultiple) return;
+                    e.preventDefault();
+                    const from = dragIndexRef.current;
+                    if (from === null || from === i) return;
+                    const reordered = [...files];
+                    const [moved] = reordered.splice(from, 1);
+                    reordered.splice(i, 0, moved);
+                    setFiles(reordered);
+                    dragIndexRef.current = null;
+                  }}
+                  className={`flex items-center gap-3 px-4 py-3 ${acceptMultiple ? "cursor-grab active:cursor-grabbing" : ""}`}
+                >
+                  {/* Drag handle for multi-file tools */}
+                  {acceptMultiple && (
+                    <svg className="w-4 h-4 text-gray-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" />
+                    </svg>
+                  )}
                   {thumbnails[f.name + f.size] ? (
                     <img
                       src={thumbnails[f.name + f.size]}
@@ -672,6 +724,9 @@ export default function ToolPage({ slug, title, description, side }: ToolPagePro
                 </div>
               ))}
             </div>
+            {acceptMultiple && files.length > 1 && !hasResult && (
+              <p className="text-xs text-gray-400 text-center">Drag files to reorder before merging</p>
+            )}
 
             {/* Add more files (merge/alternate) */}
             {acceptMultiple && !hasResult && (
@@ -693,6 +748,25 @@ export default function ToolPage({ slug, title, description, side }: ToolPagePro
               aria-label="Upload file"
               onChange={(e) => handleFiles(e.target.files)}
             />
+
+            {/* Upload progress bar */}
+            {processing && uploadProgress > 0 && uploadProgress < 100 && (
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-xs text-gray-500">
+                  <span>Uploading...</span>
+                  <span>{uploadProgress}%</span>
+                </div>
+                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-[#0282e5] rounded-full transition-all duration-300"
+                    style={{ width: `${uploadProgress}%` }}
+                  />
+                </div>
+              </div>
+            )}
+            {processing && uploadProgress >= 100 && (
+              <div className="text-xs text-gray-500 text-center">Processing on server...</div>
+            )}
 
             {/* ─── Tool-specific options ─── */}
             {!hasResult && slug === "split" && (
