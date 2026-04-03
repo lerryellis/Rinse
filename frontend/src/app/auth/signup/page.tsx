@@ -1,13 +1,24 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "@/context/AuthContext";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 
 export default function SignUpPage() {
-  const { signUpWithEmail, signInWithGoogle } = useAuth();
+  return (
+    <Suspense fallback={<div className="min-h-[75vh] flex items-center justify-center"><p className="text-gray-400">Loading...</p></div>}>
+      <SignUpContent />
+    </Suspense>
+  );
+}
+
+function SignUpContent() {
+  const { signUpWithEmail, signInWithGoogle, session } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const refCode = searchParams.get("ref");
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -28,6 +39,10 @@ export default function SignUpPage() {
       setError(err);
       setLoading(false);
     } else {
+      // Store referral code so it can be applied after email verification
+      if (refCode) {
+        localStorage.setItem("rinse_referral_code", refCode);
+      }
       setSuccess(true);
       setLoading(false);
     }

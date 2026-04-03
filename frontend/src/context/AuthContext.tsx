@@ -52,11 +52,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, s) => {
+      async (_event, s) => {
         setSession(s);
         setUser(s?.user ?? null);
         if (s?.user) {
-          fetchProfile(s.user.id);
+          await fetchProfile(s.user.id);
+          // Auto-apply stored referral code after first sign-in
+          const refCode = localStorage.getItem("rinse_referral_code");
+          if (refCode && s.access_token) {
+            try {
+              const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+              await fetch(`${apiUrl}/api/referrals/apply`, {
+                method: "POST",
+                headers: {
+                  "Authorization": `Bearer ${s.access_token}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ code: refCode }),
+              });
+              localStorage.removeItem("rinse_referral_code");
+            } catch {}
+          }
         } else {
           setProfile(null);
         }

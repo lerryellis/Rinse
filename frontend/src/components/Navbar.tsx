@@ -206,6 +206,12 @@ export default function Navbar() {
                   >
                     History
                   </Link>
+                  <Link
+                    href="/referrals"
+                    className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                  >
+                    Invite Friends
+                  </Link>
                   <button
                     type="button"
                     onClick={signOut}

@@ -135,6 +135,20 @@ def record_usage(user_id: str, tool: str, file_size: int, paid: bool = False, de
     ).execute()
 
 
+def get_bonus_conversions(user_id: str) -> int:
+    """Get bonus conversions earned through referrals."""
+    sb = get_supabase()
+    result = sb.table("profiles").select("bonus_conversions").eq("id", user_id).single().execute()
+    if result.data:
+        return result.data.get("bonus_conversions", 0)
+    return 0
+
+
+def get_effective_limit(user_id: str) -> int:
+    """Free limit + any referral bonus conversions."""
+    return FREE_LIMIT + get_bonus_conversions(user_id)
+
+
 def check_limits(user_id: str, file_size: int, device_id: Optional[str] = None) -> Optional[str]:
     """Returns an error message if limits exceeded, or None if OK."""
     if file_size > MAX_FILE_BYTES:
@@ -142,19 +156,21 @@ def check_limits(user_id: str, file_size: int, device_id: Optional[str] = None) 
         return "File too large. Maximum file size is %d MB." % max_mb
 
     used = get_effective_usage(user_id, device_id)
-    if used >= FREE_LIMIT:
+    limit = get_effective_limit(user_id)
+    if used >= limit:
         return "FREE_LIMIT_REACHED"
 
     return None
 
 
 def get_usage_info(user_id: str, device_id: Optional[str] = None) -> dict:
-    # Link device to user on every check
     if device_id:
         link_device(user_id, device_id)
 
     used = get_effective_usage(user_id, device_id)
-    free_left = max(0, FREE_LIMIT - used)
+    limit = get_effective_limit(user_id)
+    free_left = max(0, limit - used)
+    bonus = get_bonus_conversions(user_id)
 
     resets_at = None
     if free_left == 0:
@@ -167,9 +183,10 @@ def get_usage_info(user_id: str, device_id: Optional[str] = None) -> dict:
 
     return {
         "total_used": used,
-        "free_limit": FREE_LIMIT,
+        "free_limit": limit,
         "free_remaining": free_left,
         "needs_payment": free_left == 0,
         "price_per_file_ghs": PRICE_PER_FILE_GHS,
         "resets_at": resets_at,
+        "bonus_conversions": bonus,
     }

@@ -1,20 +1,32 @@
 import logging
+import os
 from contextlib import asynccontextmanager
 
+import sentry_sdk
 from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
+load_dotenv()
+
+# Initialize Sentry (no-op if DSN not set)
+sentry_dsn = os.getenv("SENTRY_DSN")
+if sentry_dsn:
+    sentry_sdk.init(
+        dsn=sentry_dsn,
+        traces_sample_rate=0.2,
+        environment=os.getenv("ENVIRONMENT", "production"),
+    )
+
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import JSONResponse
 
-from src.routers import pdf_tools, auth, payments, admin, batch, analyze, developer
+from src.routers import pdf_tools, auth, payments, admin, batch, analyze, developer, referrals
 from src.services.cleanup import cleanup_expired_files
 from src.services.rate_limit import check_rate_limit
 
-load_dotenv()
 logging.basicConfig(level=logging.INFO)
 
 scheduler = BackgroundScheduler()
@@ -67,6 +79,7 @@ app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
 app.include_router(batch.router, prefix="/api/batch", tags=["Batch"])
 app.include_router(analyze.router, prefix="/api/analyze", tags=["Analyze"])
 app.include_router(developer.router, prefix="/api/v1", tags=["Developer API"])
+app.include_router(referrals.router, prefix="/api/referrals", tags=["Referrals"])
 
 
 @app.get("/")

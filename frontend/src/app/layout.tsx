@@ -48,6 +48,14 @@ export const metadata: Metadata = {
     index: true,
     follow: true,
   },
+  icons: {
+    icon: [
+      { url: "/favicon.png", sizes: "32x32", type: "image/png" },
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/icon-192.png", sizes: "192x192" }],
+  },
   other: {
     "theme-color": "#0282e5",
   },
@@ -62,7 +70,7 @@ export default function RootLayout({
     <html lang="en" className={`${geistSans.variable} antialiased`}>
       <head>
         <link rel="manifest" href="/manifest.webmanifest" />
-        <link rel="apple-touch-icon" href="/icon-192.png" sizes="192x192" />
+        <link rel="apple-touch-icon" sizes="192x192" href="/icon-192.png" />
       </head>
       <body className="min-h-screen flex flex-col bg-white text-gray-800">
         <script dangerouslySetInnerHTML={{ __html: `if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js')}` }} />
