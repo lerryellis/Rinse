@@ -203,45 +203,55 @@ export default function ToolPage({ slug, title, description, side }: ToolPagePro
       // ─── Client-side tools ───
       if (slug === "merge") {
         if (files.length < 2) throw new Error("Select at least 2 PDFs to merge");
-        const result = await mergePdfs(files).catch(() => {
+        try {
+          const result = await mergePdfs(files);
+          setResultData(result);
+          setResultName("merged.pdf");
+        } catch {
           throw new Error("Failed to merge PDFs. One or more files may be corrupted or password-protected.");
-        });
-        setResultData(result);
-        setResultName("merged.pdf");
+        }
       } else if (slug === "split") {
         const opts: SplitOptions = splitMode === "ranges"
           ? { mode: "ranges", ranges: splitRanges }
           : { mode: "each" };
         if (splitMode === "ranges" && !splitRanges.trim()) throw new Error("Enter page ranges to split (e.g. 1-3, 5, 7-10)");
-        const results = await splitPdf(files[0], opts).catch(() => {
-          throw new Error("Failed to split PDF. The file may be corrupted or password-protected.");
-        });
-        if (results.length === 0) throw new Error("No pages matched the specified ranges. Check your page numbers.");
-        setResultMulti(results);
+        try {
+          const results = await splitPdf(files[0], opts);
+          if (results.length === 0) throw new Error("No pages matched the specified ranges.");
+          setResultMulti(results);
+        } catch (e) {
+          throw new Error(e instanceof Error ? e.message : "Failed to split PDF. The file may be corrupted or password-protected.");
+        }
       } else if (slug === "rotate") {
-        const result = await rotatePdf(files[0], rotateAngle).catch(() => {
+        try {
+          const result = await rotatePdf(files[0], rotateAngle);
+          setResultData(result);
+          setResultName("rotated.pdf");
+        } catch {
           throw new Error("Failed to rotate PDF. The file may be corrupted or password-protected.");
-        });
-        setResultData(result);
-        setResultName("rotated.pdf");
+        }
       } else if (slug === "delete-pages") {
         const pages = parsePageNumbers(pageInput);
         if (pages.length === 0) throw new Error("Enter at least one page number to delete (e.g. 1, 3, 5-7)");
         if (pageCount > 0 && pages.some((p) => p > pageCount)) throw new Error(`Invalid page number. This PDF only has ${pageCount} pages.`);
-        const result = await deletePages(files[0], pages).catch((e) => {
-          throw new Error(e.message || "Failed to delete pages. The file may be corrupted.");
-        });
-        setResultData(result);
-        setResultName("pages-deleted.pdf");
+        try {
+          const result = await deletePages(files[0], pages);
+          setResultData(result);
+          setResultName("pages-deleted.pdf");
+        } catch (e) {
+          throw new Error(e instanceof Error ? e.message : "Failed to delete pages. The file may be corrupted.");
+        }
       } else if (slug === "extract") {
         const pages = parsePageNumbers(pageInput);
         if (pages.length === 0) throw new Error("Enter at least one page number to extract (e.g. 1, 3, 5-7)");
         if (pageCount > 0 && pages.some((p) => p > pageCount)) throw new Error(`Invalid page number. This PDF only has ${pageCount} pages.`);
-        const result = await extractPages(files[0], pages).catch((e) => {
-          throw new Error(e.message || "Failed to extract pages. The file may be corrupted.");
-        });
-        setResultData(result);
-        setResultName("extracted.pdf");
+        try {
+          const result = await extractPages(files[0], pages);
+          setResultData(result);
+          setResultName("extracted.pdf");
+        } catch (e) {
+          throw new Error(e instanceof Error ? e.message : "Failed to extract pages. The file may be corrupted.");
+        }
       } else if (side === "client") {
         await new Promise((r) => setTimeout(r, 1000));
         setResultData(new Uint8Array());

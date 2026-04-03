@@ -137,10 +137,13 @@ def record_usage(user_id: str, tool: str, file_size: int, paid: bool = False, de
 
 def get_bonus_conversions(user_id: str) -> int:
     """Get bonus conversions earned through referrals."""
-    sb = get_supabase()
-    result = sb.table("profiles").select("bonus_conversions").eq("id", user_id).single().execute()
-    if result.data:
-        return result.data.get("bonus_conversions", 0)
+    try:
+        sb = get_supabase()
+        result = sb.table("profiles").select("bonus_conversions").eq("id", user_id).maybe_single().execute()
+        if result.data:
+            return result.data.get("bonus_conversions", 0)
+    except Exception:
+        pass
     return 0
 
 
@@ -151,10 +154,13 @@ def get_effective_limit(user_id: str) -> int:
 
 def _is_admin(user_id: str) -> bool:
     """Check if user is admin. Admins bypass all limits."""
-    sb = get_supabase()
-    result = sb.table("profiles").select("is_admin").eq("id", user_id).single().execute()
-    if result.data:
-        return result.data.get("is_admin", False)
+    try:
+        sb = get_supabase()
+        result = sb.table("profiles").select("is_admin").eq("id", user_id).maybe_single().execute()
+        if result.data:
+            return result.data.get("is_admin", False)
+    except Exception:
+        pass
     return False
 
 
