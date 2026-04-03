@@ -1,0 +1,74 @@
+{
+  "nav": {
+    "allTools": "All Tools",
+    "compress": "Compress",
+    "edit": "Edit",
+    "fillSign": "Fill & Sign",
+    "merge": "Merge",
+    "deletePages": "Delete Pages",
+    "crop": "Crop",
+    "pricing": "Pricing",
+    "signIn": "Sign In",
+    "signUp": "Sign Up Free",
+    "history": "History",
+    "inviteFriends": "Invite Friends",
+    "adminDashboard": "Admin Dashboard",
+    "signOut": "Sign Out",
+    "upgradePlan": "Upgrade Plan"
+  },
+  "hero": {
+    "title": "Productivity tools for your PDFs",
+    "subtitle": "Simple, easy to use, and free online PDF tools — no installation required",
+    "cta": "Edit a PDF document — it's free",
+    "note": "No registration needed · Files deleted after 2 hours · Secure & private"
+  },
+  "tools": {
+    "allPdfTools": "All PDF Tools",
+    "editSign": "Edit & Sign",
+    "organize": "Organize Pages",
+    "convert": "Convert",
+    "optimize": "Optimize & Secure",
+    "freeToUse": "Free to use",
+    "noRegistration": "No registration",
+    "filesDeleted": "Files deleted after 2h"
+  },
+  "upload": {
+    "dropHere": "Drop your PDF here",
+    "clickBrowse": "or click to browse",
+    "maxSize": "Max 50 MB",
+    "selectMultiple": "Select multiple files",
+    "processing": "Processing...",
+    "done": "Done!",
+    "downloadResult": "Download Result",
+    "startOver": "Start over with a new file"
+  },
+  "auth": {
+    "signInTitle": "Sign in to Rinse",
+    "signUpTitle": "Create your account",
+    "email": "Email",
+    "password": "Password",
+    "fullName": "Full name",
+    "continueGoogle": "Continue with Google",
+    "noAccount": "Don't have an account?",
+    "haveAccount": "Already have an account?",
+    "signInRequired": "Sign in to use this tool",
+    "createAccount": "Create Account",
+    "verifyEmail": "Verify your email to continue",
+    "checkInbox": "Check your inbox (and spam folder), then refresh this page."
+  },
+  "pricing": {
+    "title": "Simple, pay-as-you-go pricing",
+    "subtitle": "Start with 2 free conversions. After that, pay per file.",
+    "free": "Free",
+    "perFile": "Per File",
+    "perFilePrice": "GHS 2.50",
+    "getStarted": "Get Started",
+    "startUsing": "Start Using Tools"
+  },
+  "common": {
+    "loading": "Loading...",
+    "error": "Something went wrong",
+    "backHome": "Back to home",
+    "learnMore": "Learn more"
+  }
+}

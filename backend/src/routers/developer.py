@@ -24,7 +24,10 @@ def require_api_key(request: Request) -> str:
     key_hash = hashlib.sha256(key.encode()).hexdigest()
     sb = get_supabase()
 
-    result = sb.table("api_keys").select("user_id, active").eq("key_hash", key_hash).single().execute()
+    try:
+        result = sb.table("api_keys").select("user_id, active").eq("key_hash", key_hash).single().execute()
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid API key")
     if not result.data:
         raise HTTPException(status_code=401, detail="Invalid API key")
     if not result.data.get("active"):

@@ -6,8 +6,8 @@ const columns = [
     links: [
       { name: "PDF Editor", href: "/tools/edit" },
       { name: "Pricing", href: "/pricing" },
-      { name: "Desktop App", href: "#" },
-      { name: "Blog", href: "#" },
+      { name: "Blog", href: "/blog" },
+      { name: "Team", href: "/team" },
     ],
   },
   {
@@ -25,8 +25,8 @@ const columns = [
   {
     title: "Developers",
     links: [
-      { name: "HTML to PDF API", href: "#" },
-      { name: "Documentation", href: "#" },
+      { name: "Developer API", href: "/developers" },
+      { name: "Documentation", href: "/developers" },
     ],
   },
   {

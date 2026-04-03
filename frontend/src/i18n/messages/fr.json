@@ -1,0 +1,74 @@
+{
+  "nav": {
+    "allTools": "Tous les outils",
+    "compress": "Compresser",
+    "edit": "Modifier",
+    "fillSign": "Remplir et signer",
+    "merge": "Fusionner",
+    "deletePages": "Supprimer pages",
+    "crop": "Rogner",
+    "pricing": "Tarifs",
+    "signIn": "Se connecter",
+    "signUp": "Inscription gratuite",
+    "history": "Historique",
+    "inviteFriends": "Inviter des amis",
+    "adminDashboard": "Tableau de bord admin",
+    "signOut": "Se deconnecter",
+    "upgradePlan": "Ameliorer le plan"
+  },
+  "hero": {
+    "title": "Outils de productivite pour vos PDF",
+    "subtitle": "Des outils PDF en ligne simples, faciles a utiliser et gratuits — aucune installation requise",
+    "cta": "Modifier un document PDF — c'est gratuit",
+    "note": "Aucune inscription requise · Fichiers supprimes apres 2 heures · Securise et prive"
+  },
+  "tools": {
+    "allPdfTools": "Tous les outils PDF",
+    "editSign": "Modifier et signer",
+    "organize": "Organiser les pages",
+    "convert": "Convertir",
+    "optimize": "Optimiser et securiser",
+    "freeToUse": "Utilisation gratuite",
+    "noRegistration": "Sans inscription",
+    "filesDeleted": "Fichiers supprimes apres 2h"
+  },
+  "upload": {
+    "dropHere": "Deposez votre PDF ici",
+    "clickBrowse": "ou cliquez pour parcourir",
+    "maxSize": "Max 50 Mo",
+    "selectMultiple": "Selectionnez plusieurs fichiers",
+    "processing": "Traitement en cours...",
+    "done": "Termine !",
+    "downloadResult": "Telecharger le resultat",
+    "startOver": "Recommencer avec un nouveau fichier"
+  },
+  "auth": {
+    "signInTitle": "Se connecter a Rinse",
+    "signUpTitle": "Creer votre compte",
+    "email": "E-mail",
+    "password": "Mot de passe",
+    "fullName": "Nom complet",
+    "continueGoogle": "Continuer avec Google",
+    "noAccount": "Vous n'avez pas de compte ?",
+    "haveAccount": "Vous avez deja un compte ?",
+    "signInRequired": "Connectez-vous pour utiliser cet outil",
+    "createAccount": "Creer un compte",
+    "verifyEmail": "Verifiez votre e-mail pour continuer",
+    "checkInbox": "Verifiez votre boite de reception (et les spams), puis actualisez cette page."
+  },
+  "pricing": {
+    "title": "Tarification simple, a l'utilisation",
+    "subtitle": "Commencez avec 2 conversions gratuites. Ensuite, payez par fichier.",
+    "free": "Gratuit",
+    "perFile": "Par fichier",
+    "perFilePrice": "GHS 2,50",
+    "getStarted": "Commencer",
+    "startUsing": "Commencer a utiliser"
+  },
+  "common": {
+    "loading": "Chargement...",
+    "error": "Une erreur s'est produite",
+    "backHome": "Retour a l'accueil",
+    "learnMore": "En savoir plus"
+  }
+}
