@@ -212,6 +212,14 @@ export default function Navbar() {
                   >
                     Invite Friends
                   </Link>
+                  {profile?.is_admin && (
+                    <Link
+                      href="/admin"
+                      className="block px-3 py-2 text-sm text-[#7c5cfc] font-medium hover:bg-purple-50"
+                    >
+                      Admin Dashboard
+                    </Link>
+                  )}
                   <button
                     type="button"
                     onClick={signOut}

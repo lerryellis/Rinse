@@ -35,12 +35,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const fetchProfile = useCallback(async (userId: string) => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("profiles")
       .select("*")
       .eq("id", userId)
       .single();
-    if (data) setProfile(data as UserProfile);
+    if (error) {
+      console.error("[Rinse Auth] Failed to fetch profile:", error.message, error.code);
+    }
+    if (data) {
+      console.log("[Rinse Auth] Profile loaded:", { email: data.email, is_admin: data.is_admin });
+      setProfile(data as UserProfile);
+    } else {
+      console.warn("[Rinse Auth] No profile data returned for user:", userId);
+    }
   }, []);
 
   useEffect(() => {
