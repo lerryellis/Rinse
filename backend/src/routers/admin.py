@@ -10,22 +10,17 @@ router = APIRouter()
 
 
 def require_admin(request: Request) -> str:
-    """Extract user_id and verify admin role. Raises 403 if not admin."""
+    """Verify JWT via Supabase Auth and confirm admin role. Raises 401/403 on failure."""
+    from src.services.auth import _verify_token
     auth = request.headers.get("authorization", "")
     if not auth.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Authentication required")
-    try:
-        import jwt
-        token = auth.split(" ", 1)[1]
-        payload = jwt.decode(token, options={"verify_signature": False})
-        user_id = payload.get("sub")
-        if not user_id:
-            raise ValueError("No sub")
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid session")
+
+    token = auth.split(" ", 1)[1]
+    user_id = _verify_token(token)
 
     sb = get_supabase()
-    result = sb.table("profiles").select("is_admin").eq("id", user_id).single().execute()
+    result = sb.table("profiles").select("is_admin").eq("id", user_id).maybe_single().execute()
     if not result.data or not result.data.get("is_admin"):
         raise HTTPException(status_code=403, detail="Admin access required")
 

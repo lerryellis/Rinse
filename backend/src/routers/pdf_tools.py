@@ -1,11 +1,50 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, Request
 from fastapi.responses import StreamingResponse
 import io
+import ipaddress
+from urllib.parse import urlparse as _urlparse
 import fitz  # PyMuPDF
 from src.services.usage import check_limits, record_usage
 from src.services.auth import require_user
 
 router = APIRouter()
+
+
+def _is_blocked_request(url: str) -> bool:
+    """Return True if a browser request should be blocked (SSRF prevention)."""
+    try:
+        parsed = _urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return True
+        hostname = parsed.hostname or ""
+        blocked_hosts = {"localhost", "127.0.0.1", "0.0.0.0", "::1", "metadata.google.internal"}
+        if hostname.lower() in blocked_hosts:
+            return True
+        try:
+            addr = ipaddress.ip_address(hostname)
+            return addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved
+        except ValueError:
+            return False
+    except Exception:
+        return True
+
+
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+
+
+def validate_pdf_bytes(contents: bytes) -> None:
+    """Validate file is actually a PDF using magic bytes. Raises 400 if not."""
+    if len(contents) < 4 or not contents.startswith(b"%PDF"):
+        raise HTTPException(status_code=400, detail="Invalid file. Only PDF files are accepted.")
+    if len(contents) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=413, detail="File too large. Maximum size is 50 MB.")
+
+
+async def read_and_validate_pdf(file: UploadFile) -> bytes:
+    """Read an uploaded file and validate it is a real PDF."""
+    contents = await file.read()
+    validate_pdf_bytes(contents)
+    return contents
 
 
 async def enforce_limits(request: Request, file_size: int, tool: str):
@@ -21,10 +60,7 @@ async def enforce_limits(request: Request, file_size: int, tool: str):
 @router.post("/compress")
 async def compress_pdf(request: Request, file: UploadFile = File(...)):
     """Compress a PDF to reduce file size."""
-    if file.content_type != "application/pdf":
-        raise HTTPException(status_code=400, detail="File must be a PDF")
-
-    contents = await file.read()
+    contents = await read_and_validate_pdf(file)
     await enforce_limits(request, len(contents), "compress")
     original_size = len(contents)
 
@@ -52,12 +88,9 @@ async def compress_pdf(request: Request, file: UploadFile = File(...)):
 @router.post("/to-jpg")
 async def pdf_to_jpg(request: Request, file: UploadFile = File(...)):
     """Convert PDF pages to JPG images. Returns a zip of images."""
-    if file.content_type != "application/pdf":
-        raise HTTPException(status_code=400, detail="File must be a PDF")
-
     import zipfile
 
-    contents = await file.read()
+    contents = await read_and_validate_pdf(file)
     await enforce_limits(request, len(contents), "to-jpg")
     doc = fitz.open(stream=contents, filetype="pdf")
 
@@ -83,13 +116,10 @@ async def pdf_to_jpg(request: Request, file: UploadFile = File(...)):
 @router.post("/to-word")
 async def pdf_to_word(request: Request, file: UploadFile = File(...)):
     """Convert PDF to Word (.docx)."""
-    if file.content_type != "application/pdf":
-        raise HTTPException(status_code=400, detail="File must be a PDF")
-
     from docx import Document
     from docx.shared import Pt
 
-    contents = await file.read()
+    contents = await read_and_validate_pdf(file)
     await enforce_limits(request, len(contents), "to-word")
     doc = fitz.open(stream=contents, filetype="pdf")
     word_doc = Document()
@@ -122,12 +152,9 @@ async def pdf_to_word(request: Request, file: UploadFile = File(...)):
 @router.post("/to-excel")
 async def pdf_to_excel(request: Request, file: UploadFile = File(...)):
     """Convert PDF tables to Excel (.xlsx)."""
-    if file.content_type != "application/pdf":
-        raise HTTPException(status_code=400, detail="File must be a PDF")
-
     from openpyxl import Workbook
 
-    contents = await file.read()
+    contents = await read_and_validate_pdf(file)
     await enforce_limits(request, len(contents), "to-excel")
     doc = fitz.open(stream=contents, filetype="pdf")
     wb = Workbook()
@@ -162,10 +189,7 @@ async def pdf_to_excel(request: Request, file: UploadFile = File(...)):
 @router.post("/to-text")
 async def pdf_to_text(request: Request, file: UploadFile = File(...)):
     """Extract all text from a PDF."""
-    if file.content_type != "application/pdf":
-        raise HTTPException(status_code=400, detail="File must be a PDF")
-
-    contents = await file.read()
+    contents = await read_and_validate_pdf(file)
     await enforce_limits(request, len(contents), "to-text")
     doc = fitz.open(stream=contents, filetype="pdf")
 
@@ -187,10 +211,7 @@ async def pdf_to_text(request: Request, file: UploadFile = File(...)):
 @router.post("/watermark")
 async def add_watermark(request: Request, file: UploadFile = File(...), text: str = "DRAFT"):
     """Add a text watermark to a PDF."""
-    if file.content_type != "application/pdf":
-        raise HTTPException(status_code=400, detail="File must be a PDF")
-
-    contents = await file.read()
+    contents = await read_and_validate_pdf(file)
     await enforce_limits(request, len(contents), "watermark")
     doc = fitz.open(stream=contents, filetype="pdf")
 
@@ -222,12 +243,10 @@ async def add_watermark(request: Request, file: UploadFile = File(...), text: st
 @router.post("/protect")
 async def protect_pdf(request: Request, file: UploadFile = File(...), password: str = ""):
     """Password-protect a PDF."""
-    if file.content_type != "application/pdf":
-        raise HTTPException(status_code=400, detail="File must be a PDF")
     if not password:
         raise HTTPException(status_code=400, detail="Password is required")
 
-    contents = await file.read()
+    contents = await read_and_validate_pdf(file)
     await enforce_limits(request, len(contents), "protect")
     doc = fitz.open(stream=contents, filetype="pdf")
 
@@ -252,10 +271,7 @@ async def protect_pdf(request: Request, file: UploadFile = File(...), password: 
 @router.post("/unlock")
 async def unlock_pdf(request: Request, file: UploadFile = File(...), password: str = ""):
     """Remove password from a PDF."""
-    if file.content_type != "application/pdf":
-        raise HTTPException(status_code=400, detail="File must be a PDF")
-
-    contents = await file.read()
+    contents = await read_and_validate_pdf(file)
     await enforce_limits(request, len(contents), "unlock")
     doc = fitz.open(stream=contents, filetype="pdf")
 
@@ -279,10 +295,7 @@ async def unlock_pdf(request: Request, file: UploadFile = File(...), password: s
 @router.post("/crop")
 async def crop_pdf(request: Request, file: UploadFile = File(...)):
     """Auto-crop PDF page margins by detecting content bounds."""
-    if file.content_type != "application/pdf":
-        raise HTTPException(status_code=400, detail="File must be a PDF")
-
-    contents = await file.read()
+    contents = await read_and_validate_pdf(file)
     await enforce_limits(request, len(contents), "crop")
     doc = fitz.open(stream=contents, filetype="pdf")
 
@@ -388,6 +401,32 @@ async def html_to_pdf(request: Request):
     if not html and not url:
         raise HTTPException(status_code=400, detail="Provide either 'html' content or a 'url'")
 
+    # ── SSRF protection: validate URL before navigating ──
+    if url:
+        import ipaddress
+        from urllib.parse import urlparse as _urlparse
+        try:
+            parsed_url = _urlparse(url)
+            if parsed_url.scheme not in ("http", "https"):
+                raise HTTPException(status_code=400, detail="Only http and https URLs are allowed")
+            hostname = parsed_url.hostname or ""
+            if not hostname:
+                raise HTTPException(status_code=400, detail="Invalid URL")
+            # Block localhost and private IP ranges
+            blocked_hosts = {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
+            if hostname.lower() in blocked_hosts:
+                raise HTTPException(status_code=400, detail="URL not allowed")
+            try:
+                addr = ipaddress.ip_address(hostname)
+                if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+                    raise HTTPException(status_code=400, detail="URL not allowed")
+            except ValueError:
+                pass  # Not an IP address — hostname is fine
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid URL")
+
     # Estimate size for limits (use html length or a default for URL)
     size_estimate = len(html.encode("utf-8")) if html else 1024
     user_id = require_user(request)
@@ -397,8 +436,15 @@ async def html_to_pdf(request: Request):
         raise HTTPException(status_code=429, detail=error)
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page()
+        browser = await p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-web-security=false"],
+        )
+        # Block access to internal resources at the browser level
+        context = await browser.new_context()
+        await context.route("**", lambda route, req: route.abort()
+            if _is_blocked_request(req.url) else route.continue_())
+        page = await context.new_page()
 
         if url:
             await page.goto(url, wait_until="networkidle", timeout=30000)
@@ -412,6 +458,7 @@ async def html_to_pdf(request: Request):
             margin={"top": "20mm", "bottom": "20mm", "left": "15mm", "right": "15mm"},
         )
 
+        await context.close()
         await browser.close()
 
     record_usage(user_id, "html-to-pdf", len(pdf_bytes), device_id=device_id)

@@ -50,16 +50,41 @@ app = FastAPI(
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: StarletteRequest, call_next):
-        # Rate limit PDF processing endpoints more aggressively
-        if request.url.path.startswith("/api/pdf/"):
-            ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (request.client.host if request.client else "unknown")
-            error = check_rate_limit(ip, window=60, max_requests=20)  # 20 per minute
-            if error:
-                return JSONResponse(status_code=429, content={"detail": error})
+        ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (request.client.host if request.client else "unknown")
+        path = request.url.path
+
+        if path.startswith("/api/pdf/"):
+            error = check_rate_limit(ip, window=60, max_requests=20)
+        elif path.startswith("/api/auth/"):
+            # Stricter limit on auth endpoints to prevent brute-force
+            error = check_rate_limit(ip + ":auth", window=300, max_requests=10)
+        elif path.startswith("/api/payments/initialize"):
+            # Prevent payment spam
+            error = check_rate_limit(ip + ":pay", window=60, max_requests=5)
+        else:
+            error = None
+
+        if error:
+            return JSONResponse(status_code=429, content={"detail": error})
         return await call_next(request)
 
 
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: StarletteRequest, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        if request.url.scheme == "https":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
+
+
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RateLimitMiddleware)
+
+_FRONTEND_ORIGIN = os.getenv("FRONTEND_URL", "https://rinse.vercel.app")
 
 app.add_middleware(
     CORSMiddleware,
@@ -67,14 +92,13 @@ app.add_middleware(
         "http://localhost:3000",
         "http://localhost:3002",
         "https://rinse.vercel.app",
-        "https://rinse-production.up.railway.app",
-        # Allow all Vercel preview deployments
-        "https://*.vercel.app",
+        _FRONTEND_ORIGIN,
     ],
-    allow_origin_regex=r"https://.*\.vercel\.app",
+    # Only match preview deployments for the specific Rinse project (not arbitrary vercel.app subdomains)
+    allow_origin_regex=r"https://rinse(-[a-z0-9]+)?\.vercel\.app",
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Device-Id"],
 )
 
 app.include_router(pdf_tools.router, prefix="/api/pdf", tags=["PDF Tools"])

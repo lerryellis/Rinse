@@ -142,6 +142,12 @@ export default function ToolPage({ slug, title, description, side }: ToolPagePro
       }
 
       const data = await res.json();
+      // Validate redirect URL is a real Paystack checkout page
+      const redirectUrl = new URL(data.authorization_url);
+      const allowedHosts = ["checkout.paystack.com", "paystack.com", window.location.host];
+      if (!allowedHosts.includes(redirectUrl.hostname)) {
+        throw new Error("Unexpected payment redirect. Please try again.");
+      }
       window.location.href = data.authorization_url;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Payment failed");

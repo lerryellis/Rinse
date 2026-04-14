@@ -70,7 +70,7 @@ async def payment_status():
 async def initialize_payment(request: Request, body: InitPaymentRequest):
     """Initialize a Paystack payment for a single file action."""
     user_id = require_user(request)
-    reference = f"rinse-{uuid.uuid4().hex[:12]}"
+    reference = f"rinse-{uuid.uuid4().hex}"
 
     # Get user email
     sb = get_supabase()
@@ -160,13 +160,23 @@ async def initialize_payment(request: Request, body: InitPaymentRequest):
 
 
 @router.get("/verify/{reference}", response_model=VerifyResponse)
-async def verify_payment(reference: str):
+async def verify_payment(request: Request, reference: str):
     """Verify a Paystack payment and mark it as successful."""
+    # Require authenticated user
+    user_id = require_user(request)
+
     sb = get_supabase()
 
-    # Check if already processed (handles test mode too)
-    existing = sb.table("payments").select("status, user_id, tool").eq("reference", reference).single().execute()
-    if existing.data and existing.data.get("status") == "success":
+    # Load payment record — must belong to the authenticated user
+    existing = sb.table("payments").select("status, user_id, tool").eq("reference", reference).maybe_single().execute()
+    if not existing.data:
+        raise HTTPException(status_code=404, detail="Payment reference not found")
+
+    # Prevent one user from verifying another's payment
+    if existing.data.get("user_id") != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if existing.data.get("status") == "success":
         return VerifyResponse(
             status="success",
             reference=reference,
@@ -178,13 +188,10 @@ async def verify_payment(reference: str):
     # ── TEST MODE ──
     secret = _get_paystack_secret()
     if not secret:
-        # In test mode, auto-approve
-        sb.table("payments").update({"status": "success"}).eq("reference", reference).execute()
-        if existing.data:
-            user_id = existing.data.get("user_id")
-            tool = existing.data.get("tool")
-            if user_id and tool:
-                record_usage(user_id, tool, 0, paid=True)
+        sb.table("payments").update({"status": "success"}).eq("reference", reference).eq("user_id", user_id).execute()
+        tool = existing.data.get("tool")
+        if tool:
+            record_usage(user_id, tool, 0, paid=True)
         return VerifyResponse(
             status="success",
             reference=reference,
@@ -211,17 +218,23 @@ async def verify_payment(reference: str):
     paid = tx.get("status") == "success"
     amount_ghs = tx.get("amount", 0) / 100
 
+    # Verify the payment belongs to this user via Paystack metadata
+    metadata = tx.get("metadata", {})
+    paystack_user_id = metadata.get("user_id")
+    if paystack_user_id and paystack_user_id != user_id:
+        logger.warning("Payment user_id mismatch: %s vs %s for ref %s", paystack_user_id, user_id, reference)
+        raise HTTPException(status_code=403, detail="Payment does not belong to this account")
+
+    # Only store essential fields — not the full payment processor response
     sb.table("payments").update({
         "status": "success" if paid else "failed",
-        "paystack_response": tx,
-    }).eq("reference", reference).execute()
+        "paystack_reference": tx.get("reference"),
+        "paystack_channel": tx.get("channel"),
+    }).eq("reference", reference).eq("user_id", user_id).execute()
 
-    if paid:
-        metadata = tx.get("metadata", {})
-        user_id = metadata.get("user_id")
-        tool = metadata.get("tool")
-        if user_id and tool:
-            record_usage(user_id, tool, 0, paid=True)
+    tool = existing.data.get("tool")
+    if paid and tool:
+        record_usage(user_id, tool, 0, paid=True)
 
     return VerifyResponse(
         status="success" if paid else "failed",
