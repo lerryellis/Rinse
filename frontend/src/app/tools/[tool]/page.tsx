@@ -1,6 +1,7 @@
 import ToolPage from "@/components/ToolPage";
 import PdfEditor from "@/components/PdfEditor";
 import FillAndSign from "@/components/FillAndSign";
+import HtmlToWord from "@/components/HtmlToWord";
 
 const toolMeta: Record<string, { title: string; description: string; side: "client" | "server" }> = {
   edit: { title: "PDF Editor", description: "Edit text, images, and links in your PDF", side: "client" },
@@ -27,6 +28,7 @@ const toolMeta: Record<string, { title: string; description: string; side: "clie
   protect: { title: "Protect PDF", description: "Add a password to protect your PDF", side: "server" },
   unlock: { title: "Unlock PDF", description: "Remove the password from a protected PDF", side: "server" },
   "html-to-pdf": { title: "HTML to PDF", description: "Convert HTML content or a webpage URL to a PDF document", side: "server" },
+  "html-to-word": { title: "HTML to Word", description: "Convert HTML content, a webpage URL, or an .html file into an editable .docx", side: "client" },
 };
 
 export async function generateStaticParams() {
@@ -60,5 +62,6 @@ export default async function Page({ params }: { params: Promise<{ tool: string 
 
   if (tool === "edit") return <PdfEditor />;
   if (tool === "fill-sign") return <FillAndSign />;
+  if (tool === "html-to-word") return <HtmlToWord />;
   return <ToolPage slug={tool} title={meta.title} description={meta.description} side={meta.side} />;
 }

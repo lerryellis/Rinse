@@ -1,0 +1,7 @@
+{
+  "name": "empty-stub-pkg",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.js",
+  "browser": "index.js"
+}

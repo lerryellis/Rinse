@@ -287,6 +287,21 @@ const convertTools: Tool[] = [
       </svg>
     ),
   },
+  {
+    name: "HTML to Word",
+    desc: "Convert webpage or HTML to .docx — in your browser",
+    href: "/tools/html-to-word",
+    color: "#1d4ed8",
+    bgColor: "#eaf2ff",
+    icon: (
+      <svg viewBox="0 0 40 40" fill="none">
+        <rect width="40" height="40" rx="8" fill="#eaf2ff" />
+        <text x="6" y="17" fontFamily="monospace" fontSize="7" fill="#1d4ed8" opacity=".7">&lt;/&gt;</text>
+        <rect x="20" y="14" width="14" height="16" rx="2" fill="#1d4ed8" opacity=".7" />
+        <text x="22" y="25" fontFamily="sans-serif" fontWeight="bold" fontSize="9" fill="#ffffff">W</text>
+      </svg>
+    ),
+  },
 ];
 
 const optimizeTools: Tool[] = [
