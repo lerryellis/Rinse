@@ -1,10 +1,12 @@
 "use client";
 
 import { useState, useRef } from "react";
+import { useAuth } from "@/context/AuthContext";
 
 type Mode = "url" | "code" | "file";
 
 export default function HtmlToWord() {
+  const { session } = useAuth();
   const [mode, setMode] = useState<Mode>("code");
   const [url, setUrl] = useState("");
   const [code, setCode] = useState("");
@@ -35,12 +37,24 @@ export default function HtmlToWord() {
 
   async function fetchHtmlFromUrl(input: string): Promise<string> {
     const parsed = safeUrl(input);
-    // Fetch via a public CORS-friendly read-only proxy on the client.
-    // We don't need server processing — only the raw HTML to feed into the converter.
-    const proxied = `https://r.jina.ai/${parsed.toString()}`;
-    const res = await fetch(proxied);
-    if (!res.ok) throw new Error("Could not fetch that URL. Try pasting the HTML instead.");
-    return await res.text();
+    if (!session?.access_token) {
+      throw new Error("Sign in to fetch a URL, or paste the HTML directly.");
+    }
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const res = await fetch(`${apiUrl}/api/pdf/fetch-html`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ url: parsed.toString() }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => null);
+      throw new Error(err?.detail || "Could not fetch that URL. Try pasting the HTML instead.");
+    }
+    const data = (await res.json()) as { html: string };
+    return data.html;
   }
 
   async function convert() {

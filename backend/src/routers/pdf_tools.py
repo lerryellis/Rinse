@@ -372,6 +372,58 @@ async def word_to_pdf(request: Request, file: UploadFile = File(...)):
     )
 
 
+@router.post("/fetch-html")
+async def fetch_html(request: Request):
+    """Fetch the HTML of a public URL on behalf of the browser. SSRF-hardened."""
+    import httpx
+    require_user(request)
+    body = await request.json()
+    url = (body.get("url") or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="URL is required")
+
+    try:
+        parsed = _urlparse(url)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid URL")
+
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(status_code=400, detail="Only http and https URLs are allowed")
+    hostname = (parsed.hostname or "").lower()
+    if not hostname:
+        raise HTTPException(status_code=400, detail="Invalid URL")
+    if hostname in {"localhost", "0.0.0.0", "::1"}:
+        raise HTTPException(status_code=400, detail="URL not allowed")
+    try:
+        addr = ipaddress.ip_address(hostname)
+        if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+            raise HTTPException(status_code=400, detail="URL not allowed")
+    except ValueError:
+        pass
+
+    MAX_HTML_BYTES = 5 * 1024 * 1024  # 5 MB cap
+    try:
+        async with httpx.AsyncClient(
+            timeout=15.0,
+            follow_redirects=True,
+            max_redirects=5,
+            headers={"User-Agent": "RinseHTMLFetcher/1.0"},
+        ) as client:
+            resp = await client.get(url)
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail="Could not fetch that URL")
+
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=502, detail=f"Remote server returned {resp.status_code}")
+
+    content_type = resp.headers.get("content-type", "").lower()
+    if "html" not in content_type and "text" not in content_type:
+        raise HTTPException(status_code=415, detail="URL did not return HTML content")
+
+    html = resp.text[:MAX_HTML_BYTES]
+    return {"html": html, "url": str(resp.url)}
+
+
 @router.post("/html-to-pdf")
 async def html_to_pdf(request: Request):
     """Convert HTML content or a URL to PDF using a headless browser."""
