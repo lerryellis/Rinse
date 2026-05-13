@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from fastapi import Request, HTTPException
 from src.services.usage import get_supabase
 
@@ -16,18 +15,11 @@ def _verify_token(token: str) -> str:
     no reliance on unverified local decoding.
     Raises HTTPException on any failure.
     """
-    from supabase import create_client
-    url = os.getenv("SUPABASE_URL", "")
-    # Use the service key so get_user() has the authority to validate
-    key = os.getenv("SUPABASE_SERVICE_KEY", "")
-    if not url or not key:
-        raise HTTPException(status_code=500, detail="Server configuration error")
-
     try:
-        client = create_client(url, key)
+        client = get_supabase()
         response = client.auth.get_user(token)
         user = response.user
-        if not user or not user.id:
+        if not user or not getattr(user, "id", None):
             raise HTTPException(status_code=401, detail="Invalid session. Please sign in again.")
         return str(user.id)
     except HTTPException:
